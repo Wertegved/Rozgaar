@@ -5,6 +5,7 @@ const state = {
   user: null,
   jobs: [],
   notifications: [],
+  unreadCount: 0,
   complaints: [],
   disputes: [],
   payments: [],
@@ -165,6 +166,9 @@ function renderShell() {
                 <span class="avatar-mini">${escapeHtml((state.user.name || 'A').charAt(0).toUpperCase())}</span>
                 <span>${escapeHtml(state.user.name || 'Admin')}</span>
               </div>
+              <button type="button" class="secondary-button notification-button" data-action="open-notifications" aria-label="Open notifications">
+                Notifications${state.unreadCount ? `<span class="notification-count">${state.unreadCount > 99 ? '99+' : state.unreadCount}</span>` : ''}
+              </button>
               <button type="button" class="secondary-button" data-action="refresh-data">Refresh</button>
               <button type="button" class="primary-button" data-action="logout">Logout</button>
             ` : `
@@ -212,6 +216,9 @@ function bindGlobalEvents() {
         break;
       case 'refresh-data':
         await refreshData();
+        break;
+      case 'open-notifications':
+        await openNotificationsDrawer();
         break;
       case 'close-drawer':
         closeDrawer();
@@ -311,10 +318,11 @@ async function refreshData() {
   }
 
   try {
-    const [me, jobs, notifications, payments, disputes, complaints] = await Promise.all([
+    const [me, jobs, notifications, unread, payments, disputes, complaints] = await Promise.all([
       api('/auth/me'),
       api('/jobs?page=1&page_size=100'),
       api('/notifications?page=1&page_size=50'),
+      api('/notifications/unread-count'),
       api('/admin/payments').catch(() => ({ items: [], simulated_transaction_value: 0 })),
       api('/admin/disputes').catch(() => []),
       api('/admin/complaints').catch(() => ({ items: [] })),
@@ -323,6 +331,7 @@ async function refreshData() {
     state.user = me;
     state.jobs = jobs?.items || [];
     state.notifications = notifications?.items || [];
+    state.unreadCount = Number(unread?.count || 0);
     state.payments = payments?.items || [];
     state.paymentSummary = Number(payments?.simulated_transaction_value ?? 0);
     state.disputes = disputes || [];
@@ -487,7 +496,8 @@ function signOut() {
 async function markNotificationRead(id) {
   try {
     await api(`/notifications/${id}/read`, { method: 'POST' });
-    await refreshData();
+    await refreshNotifications();
+    renderNotificationDrawer();
     toast('Notification marked as read.');
   } catch (error) {
     toast(error.message);
@@ -497,10 +507,56 @@ async function markNotificationRead(id) {
 async function markAllRead() {
   try {
     await api('/notifications/read-all', { method: 'POST' });
-    await refreshData();
+    await refreshNotifications();
+    renderNotificationDrawer();
     toast('All notifications marked as read.');
   } catch (error) {
     toast(error.message);
+  }
+}
+
+async function refreshNotifications() {
+  const [notifications, unread] = await Promise.all([
+    api('/notifications?page=1&page_size=50'),
+    api('/notifications/unread-count'),
+  ]);
+  state.notifications = notifications?.items || [];
+  state.unreadCount = Number(unread?.count || 0);
+}
+
+function renderNotificationDrawer() {
+  const items = state.notifications;
+  const content = `
+    <div class="drawer-head">
+      <div class="drawer-heading">
+        <div class="eyebrow">Admin inbox</div>
+        <h2>Notifications</h2>
+      </div>
+      <button type="button" class="close-button" data-action="close-drawer" aria-label="Close notifications">×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="inline-actions">
+        <span class="muted-copy">${state.unreadCount} unread</span>
+        <button type="button" class="secondary-button small-button" data-action="mark-all-read" ${state.unreadCount ? '' : 'disabled'}>Mark all as read</button>
+      </div>
+      ${items.length ? `<div class="notification-list">${items.map((item) => `
+        <button type="button" class="notification-item ${item.is_read ? '' : 'is-unread'}" data-action="mark-notification-read" data-id="${item.id}">
+          <span class="notification-item-heading"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(statusLabel(item.notification_type))}</small></span>
+          <span class="notification-item-message">${escapeHtml(item.message)}</span>
+          <span class="notification-item-meta">${dateLabel(item.created_at)}${item.is_read ? ' · Read' : ' · Unread'}</span>
+        </button>
+      `).join('')}</div>` : '<div class="blank-card"><strong>No notifications yet.</strong><span>Your authorized Admin updates will appear here.</span></div>'}
+    </div>`;
+  openDrawer(content);
+}
+
+async function openNotificationsDrawer() {
+  openDrawer('<div class="drawer-body"><div class="loading-state">Loading notifications…</div></div>');
+  try {
+    await refreshNotifications();
+    renderNotificationDrawer();
+  } catch (error) {
+    openDrawer(`<div class="drawer-head"><div class="drawer-heading"><div class="eyebrow">Admin inbox</div><h2>Notifications</h2></div><button type="button" class="close-button" data-action="close-drawer" aria-label="Close notifications">×</button></div><div class="blank-card"><strong>Notifications could not load.</strong><span>${escapeHtml(error.message)}</span></div>`);
   }
 }
 

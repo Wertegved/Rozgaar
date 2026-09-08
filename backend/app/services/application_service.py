@@ -12,6 +12,7 @@ from app.db.models.enums import AgreementStatus, ApplicationStatus, JobStatus, N
 from app.db.models.jobs import Job
 from app.db.models.negotiations import Negotiation
 from app.db.models.users import ConsumerProfile, User, WorkerProfile
+from app.db.models.reviews import Review
 from app.schemas.applications import (
     AgreementResponse,
     ApplicantResponse,
@@ -225,7 +226,8 @@ def list_applicants(session: Session, user: User, job_id: UUID) -> list[Applican
             id=item.id,
             worker_id=item.worker_id,
             worker_name=item.worker.user.name,
-            worker_rating=item.worker.rating_average,
+                worker_rating=session.scalar(select(func.avg(Review.rating)).where(Review.reviewed_user_id == item.worker.user_id)),
+                worker_review_count=session.scalar(select(func.count(Review.id)).where(Review.reviewed_user_id == item.worker.user_id)) or 0,
             worker_reliability=item.worker.reliability_score,
             worker_availability=item.worker.availability,
             proposed_price=item.proposed_price,

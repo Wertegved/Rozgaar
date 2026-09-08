@@ -13,9 +13,10 @@ from app.db.models.jobs import Job
 from app.db.models.users import ConsumerProfile, User, WorkerProfile
 from app.providers.base import PaymentProvider
 from app.providers.simulated import SimulatedPaymentProvider
-from app.schemas.payments import PaymentListResponse, PaymentResponse
+from app.schemas.payments import PaymentListResponse, PaymentResponse, SimulatedCardRequest
 from app.db.models.enums import NotificationType
 from app.services.notification_service import NotificationService
+from app.services.email_service import EmailService
 
 
 CENT = Decimal("0.01")
@@ -61,11 +62,41 @@ def _amounts(agreement: Agreement) -> tuple[Decimal, Decimal]:
     return advance, final
 
 
+def _validate_payment_details(payment_details: SimulatedCardRequest | None) -> None:
+    if payment_details is None:
+        return
+    from datetime import date
+    if payment_details.expiry_year < date.today().year or (payment_details.expiry_year == date.today().year and payment_details.expiry_month < date.today().month):
+        raise APIError(422, "Card expiry cannot be in the past")
+
+
+def _send_payment_emails(session: Session, agreement: Agreement, payment: Payment, payer_id: UUID, payee_id: UUID) -> None:
+    payer = session.get(User, payer_id)
+    payee = session.get(User, payee_id)
+    if payer is None or payee is None:
+        return
+    stage = "advance" if payment.payment_type is PaymentType.ADVANCE else "final"
+    amount = payment.advance_amount if payment.payment_type is PaymentType.ADVANCE else payment.final_amount
+    timestamp = payment.created_at.isoformat()
+    reference = payment.transaction_reference or "pending"
+    EmailService().send(
+        payer.email,
+        f"Rozgaar simulated {stage} payment confirmation",
+        f"Your {stage} payment for {agreement.job.title} was processed.\nWorker: {payee.name}\nAmount: ₹{amount}\nReference: {reference}\nTimestamp: {timestamp}\nThis is a simulated demo transaction; no real money moved.",
+    )
+    EmailService().send(
+        payee.email,
+        f"Rozgaar simulated {stage} payment received",
+        f"A {stage} payment for {agreement.job.title} was recorded.\nConsumer: {payer.name}\nAmount: ₹{amount}\nReference: {reference}\nTimestamp: {timestamp}\nThis is a simulated demo transaction; no real money moved.",
+    )
+
+
 def pay_advance(
     session: Session,
     user: User,
     agreement_id: UUID,
     provider: PaymentProvider | None = None,
+    payment_details: SimulatedCardRequest | None = None,
 ) -> PaymentResponse:
     agreement = _agreement_with_context(session, agreement_id, lock=True)
     if agreement.status is not AgreementStatus.ACTIVE:
@@ -74,6 +105,7 @@ def pay_advance(
     if user.role is not UserRole.CONSUMER or user.id != payer_id:
         raise APIError(403, "Only the agreement consumer may pay the advance")
     advance, final = _amounts(agreement)
+    _validate_payment_details(payment_details)
     existing = session.scalar(
         select(Payment).where(
             Payment.agreement_id == agreement.id,
@@ -140,13 +172,15 @@ def pay_advance(
         raise APIError(409, "Simulated advance payment failed")
     service = NotificationService()
     for recipient in {payer_id, payee_id}:
+        is_payer = recipient == payer_id
         service.create_notification(
             session, recipient, NotificationType.ADVANCE_PAYMENT_COMPLETED,
-            "Advance payment completed", "An advance payment for your agreement was completed.",
-            "agreement", agreement.id,
+            "Advance payment completed" if is_payer else "Advance payment received", f"Advance payment of ₹{advance} for {agreement.job.title} completed. Reference: {existing.transaction_reference}.",
+            "agreement", agreement.id, send_email=False,
             idempotency_key=f"advance-payment-completed:{agreement.id}",
         )
     session.commit()
+    _send_payment_emails(session, agreement, existing, payer_id, payee_id)
     return _payment_response(existing)
 
 
@@ -206,6 +240,7 @@ def release_final_payment(
     agreement_id: UUID,
     provider: PaymentProvider | None = None,
     commit: bool = True,
+    payment_details: SimulatedCardRequest | None = None,
 ) -> PaymentResponse:
     agreement = _agreement_with_context(session, agreement_id, lock=True)
     if agreement.status is not AgreementStatus.ACTIVE:
@@ -221,6 +256,7 @@ def release_final_payment(
     if advance is None:
         raise APIError(409, "A completed advance payment is required")
     _, final_amount = _amounts(agreement)
+    _validate_payment_details(payment_details)
     existing = session.scalar(
         select(Payment).where(Payment.agreement_id == agreement_id, Payment.payment_type == PaymentType.FINAL)
     )
@@ -266,11 +302,13 @@ def release_final_payment(
         raise APIError(409, "Simulated final payment failed")
     service = NotificationService()
     for recipient in (payer_id, payee_id):
+        is_payer = recipient == payer_id
         service.create_notification(
             session, recipient, NotificationType.FINAL_PAYMENT_COMPLETED,
-            "Final payment completed", "Final payment for your completed job was processed.",
-            "agreement", agreement.id,
+            "Final payment completed" if is_payer else "Final payment received", f"Final payment of ₹{final_amount} for {agreement.job.title} completed. Reference: {existing.transaction_reference}.",
+            "agreement", agreement.id, send_email=False,
             idempotency_key=f"final-payment-completed:{agreement.id}",
         )
     session.commit()
+    _send_payment_emails(session, agreement, existing, payer_id, payee_id)
     return _payment_response(existing)

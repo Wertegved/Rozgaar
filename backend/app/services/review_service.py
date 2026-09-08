@@ -15,6 +15,9 @@ from app.db.models.users import ConsumerProfile, User, WorkerProfile
 from app.schemas.reviews import ReputationResponse, ReviewCreateRequest, ReviewListResponse, ReviewResponse
 from app.db.models.enums import NotificationType
 from app.services.notification_service import NotificationService
+from app.realtime.events import RealtimeEvent
+from app.realtime.models import RealtimeResourceScope, RealtimeSubject
+from app.realtime.service import RealtimeDelivery, build_event
 
 
 def _response(item: Review) -> ReviewResponse:
@@ -96,6 +99,17 @@ def create_review(session: Session, user: User, job_id: UUID, data: ReviewCreate
     NotificationService().create_notification(session, data.reviewed_user_id, NotificationType.REVIEW_AVAILABLE, "Review available", "A completed job has a new review available.", "job", job_id, idempotency_key=f"review-available:{item.id}")
     NotificationService().create_notification(session, user.id, NotificationType.REVIEW_CREATED, "Review created", "Your review was recorded for the completed job.", "review", item.id, idempotency_key=f"review-created:{item.id}")
     session.commit()
+    consumer_id = _consumer_id(session, job)
+    worker_ids = _worker_ids(session, job.id)
+    subjects = [RealtimeSubject(consumer_id, UserRole.CONSUMER)] if consumer_id else []
+    subjects.extend(RealtimeSubject(worker_id, UserRole.WORKER) for worker_id in worker_ids)
+    RealtimeDelivery().publish(build_event(
+        RealtimeEvent.REVIEW_CREATED,
+        {"review_id": item.id, "job_id": job_id, "reviewed_user_id": data.reviewed_user_id, "rating": data.rating},
+        subjects,
+        RealtimeResourceScope(participant_user_ids=frozenset({consumer_id, *worker_ids} - {None})),
+        correlation_id=str(item.id),
+    ))
     return _response(item)
 
 

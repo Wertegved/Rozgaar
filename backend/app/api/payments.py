@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import get_current_user, require_admin, require_consumer, require_worker
 from app.db.models.users import User
 from app.db.session import get_db
-from app.schemas.payments import PaymentListResponse, PaymentResponse
+from app.schemas.payments import PaymentListResponse, PaymentResponse, SimulatedCardRequest
 from app.services.payment_service import agreement_payments, get_payment, pay_advance, user_payments
 
 
@@ -16,10 +16,11 @@ router = APIRouter(tags=["payments"])
 @router.post("/agreements/{agreement_id}/payments/advance", response_model=PaymentResponse)
 def pay_agreement_advance(
     agreement_id: UUID,
+    data: SimulatedCardRequest | None = None,
     user: User = Depends(require_consumer),
     session: Session = Depends(get_db),
 ) -> PaymentResponse:
-    return pay_advance(session, user, agreement_id)
+    return pay_advance(session, user, agreement_id, payment_details=data)
 
 
 @router.get("/agreements/{agreement_id}/payments", response_model=PaymentListResponse)

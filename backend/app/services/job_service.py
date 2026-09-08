@@ -10,6 +10,7 @@ from app.db.models.enums import JobStatus, UserRole
 from app.db.models.jobs import Job, JobImage, JobRequirement
 from app.db.models.skills import Skill
 from app.db.models.users import ConsumerProfile, User, WorkerProfile
+from app.db.models.reviews import Review
 from app.schemas.jobs import JobCreateRequest, JobListQuery, JobResponse, JobUpdateRequest, PaginatedJobsResponse, SkillResponse
 from app.services.location_intelligence_service import resolve_location
 
@@ -25,6 +26,13 @@ def _job_query():
 
 
 def _job_response(job: Job) -> JobResponse:
+    consumer = job.consumer.user if job.consumer is not None and job.consumer.user is not None else None
+    review_count = 0
+    rating = None
+    if consumer is not None:
+        reviews = list(consumer.reviews_received)
+        review_count = len(reviews)
+        rating = sum(item.rating for item in reviews) / review_count if review_count else None
     return JobResponse(
         id=job.id,
         category=job.category,
@@ -40,6 +48,10 @@ def _job_response(job: Job) -> JobResponse:
         start_time=job.start_time,
         end_time=job.end_time,
         status=job.status,
+        consumer_id=consumer.id if consumer else None,
+        consumer_name=consumer.name if consumer else None,
+        consumer_rating=rating,
+        consumer_review_count=review_count,
         created_at=job.created_at,
         updated_at=job.updated_at,
         required_skills=[SkillResponse(id=item.skill.id, name=item.skill.name) for item in job.requirements],

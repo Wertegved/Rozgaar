@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 import smtplib
+from typing import ClassVar
 
 from app.core.config import get_settings
 
@@ -25,9 +26,11 @@ class EmailProvider:
 @dataclass
 class FakeEmailProvider(EmailProvider):
     sent: list[EmailMessageData] = field(default_factory=list)
+    outbox: ClassVar[list[EmailMessageData]] = []
 
     def send(self, message: EmailMessageData) -> bool:
         self.sent.append(message)
+        type(self).outbox.append(message)
         return True
 
 

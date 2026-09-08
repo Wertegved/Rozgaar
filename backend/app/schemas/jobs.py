@@ -136,6 +136,10 @@ class JobResponse(BaseModel):
     start_time: time | None
     end_time: time | None
     status: JobStatus
+    consumer_id: UUID | None = None
+    consumer_name: str | None = None
+    consumer_rating: float | None = None
+    consumer_review_count: int = 0
     created_at: datetime
     updated_at: datetime
     required_skills: list[SkillResponse]

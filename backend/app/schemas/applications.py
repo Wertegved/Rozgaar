@@ -51,6 +51,7 @@ class ApplicantResponse(BaseModel):
     worker_id: UUID
     worker_name: str
     worker_rating: float | None
+    worker_review_count: int = 0
     worker_reliability: float | None
     worker_availability: str | None
     proposed_price: Decimal

@@ -3,10 +3,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.payments import SimulatedCardRequest
+
 
 class CompletionSubmitRequest(BaseModel):
     storage_path: str = Field(min_length=1, max_length=500)
     storage_bucket: str = Field(default="completion-evidence", min_length=1, max_length=100)
+    payment_details: SimulatedCardRequest | None = None
 
     @field_validator("storage_path")
     @classmethod

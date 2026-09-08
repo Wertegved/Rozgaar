@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.db.models.enums import AccountStatus, UserRole
+from app.db.models.reviews import Review
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -22,6 +23,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     consumer_profile: Mapped["ConsumerProfile | None"] = relationship(back_populates="user")
     worker_profile: Mapped["WorkerProfile | None"] = relationship(back_populates="user")
+    reviews_received: Mapped[list[Review]] = relationship(foreign_keys=[Review.reviewed_user_id], viewonly=True)
 
 
 class ConsumerProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
