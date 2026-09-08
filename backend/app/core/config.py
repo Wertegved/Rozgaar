@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -10,7 +11,14 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_host: str = "127.0.0.1"
     api_port: int = 8000
-    cors_origins: str = Field(default="", validation_alias="CORS_ORIGINS")
+    cors_origins: str = Field(
+        default=(
+            "http://localhost:5500,http://127.0.0.1:5500,"
+            "http://localhost:5501,http://127.0.0.1:5501,"
+            "http://localhost:5502,http://127.0.0.1:5502"
+        ),
+        validation_alias="CORS_ORIGINS",
+    )
     database_url: str | None = None
     supabase_url: str | None = None
     supabase_anon_key: str | None = None
@@ -44,7 +52,7 @@ class Settings(BaseSettings):
     realtime_publication: str = "supabase_realtime"
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(Path(__file__).resolve().parents[2] / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

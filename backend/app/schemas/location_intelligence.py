@@ -28,6 +28,14 @@ class RegionIntelligence(BaseModel):
     opportunity_score: float | None
 
 
+class NearbyWorkerSummary(BaseModel):
+    id: str
+    name: str
+    location: str | None = None
+    availability: str | None = None
+    skills: list[str] = []
+
+
 class ConsumerLocationIntelligence(BaseModel):
     location: ResolvedLocation
     category: str
@@ -36,6 +44,7 @@ class ConsumerLocationIntelligence(BaseModel):
     supply_level: str
     demand_level: str
     regions: list[RegionIntelligence]
+    nearby_workers: list[NearbyWorkerSummary] = []
 
 
 class WorkerLocationIntelligence(BaseModel):

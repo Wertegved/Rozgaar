@@ -16,7 +16,7 @@ from app.core.config import get_settings
 from app.db.base import Base
 from app.db.models.enums import AccountStatus, EmergencyLevel, UserRole
 from app.db.models.skills import Skill
-from app.db.models.users import ConsumerProfile, User, WorkerProfile
+from app.db.models.users import ConsumerProfile, User, WorkerProfile, WorkerSkill
 from app.db.session import get_db
 from app.main import app
 
@@ -49,9 +49,13 @@ def job_context(monkeypatch: pytest.MonkeyPatch) -> Generator[dict[str, object],
     session.add_all([consumer, worker, admin])
     session.flush()
     consumer_profile = ConsumerProfile(user_id=consumer.id)
-    session.add_all([consumer_profile, WorkerProfile(user_id=worker.id), Skill(name="Painting")])
+    worker_profile = WorkerProfile(user_id=worker.id)
+    skill = Skill(name="Painting")
+    session.add_all([consumer_profile, worker_profile, skill])
     session.commit()
     skill = session.scalar(select(Skill).where(Skill.name == "Painting"))
+    session.add(WorkerSkill(worker_id=worker_profile.id, skill_id=skill.id))
+    session.commit()
     session.close()
 
     def override_get_db() -> Generator[Session, None, None]:
@@ -154,6 +158,64 @@ def test_worker_discovery_filters_and_pagination(job_context: dict[str, object])
     assert body["total"] == 2
     assert body["page_size"] == 1
     assert len(body["items"]) == 1
+
+
+def test_worker_discovery_respects_saved_working_region(job_context: dict[str, object]) -> None:
+    client = job_context["client"]
+    consumer = job_context["consumer"]
+    worker = job_context["worker"]
+    session = job_context["session_factory"]()
+    worker_profile = session.scalar(select(WorkerProfile).where(WorkerProfile.user_id == worker.id))
+    worker_profile.working_location = "Salt Lake, Kolkata"
+    worker_profile.working_latitude = 22.5726
+    worker_profile.working_longitude = 88.3639
+    session.commit()
+    session.close()
+
+    local_job = create_payload()
+    local_job.update({
+        "location": "Salt Lake, Kolkata",
+        "title": "Local painting job",
+        "category": "painting",
+        "minimum_platform_cost": "1500.00",
+    })
+    distant_job = create_payload()
+    distant_job.update({
+        "location": "Mumbai Central",
+        "title": "Mumbai painting job",
+        "category": "painting",
+        "minimum_platform_cost": "2000.00",
+    })
+
+    assert client.post("/api/v1/jobs", headers=headers(consumer), json=local_job).status_code == 201
+    assert client.post("/api/v1/jobs", headers=headers(consumer), json=distant_job).status_code == 201
+
+    response = client.get("/api/v1/jobs?page=1&page_size=20", headers=headers(worker))
+    assert response.status_code == 200
+    titles = {item["title"] for item in response.json()["items"]}
+    assert "Local painting job" in titles
+    assert "Mumbai painting job" not in titles
+
+
+def test_consumer_location_intelligence_includes_matching_workers(job_context: dict[str, object]) -> None:
+    client = job_context["client"]
+    consumer = job_context["consumer"]
+    worker = job_context["worker"]
+    session = job_context["session_factory"]()
+    profile = session.scalar(select(WorkerProfile).where(WorkerProfile.user_id == worker.id))
+    profile.working_location = "Salt Lake, Kolkata"
+    profile.working_latitude = 22.5726
+    profile.working_longitude = 88.3639
+    profile.availability = "AVAILABLE"
+    session.commit()
+    session.close()
+
+    response = client.get("/api/v1/location-intelligence/consumer?location=Salt%20Lake%2C%20Kolkata&category=painting", headers=headers(consumer))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["nearby_worker_count"] >= 1
+    assert body["nearby_workers"][0]["name"] == "Worker"
+    assert body["nearby_workers"][0]["availability"] == "AVAILABLE"
 
 
 def test_job_detail_and_access_controls(job_context: dict[str, object]) -> None:

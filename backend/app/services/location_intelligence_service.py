@@ -1,4 +1,5 @@
 import json
+import re
 from math import atan2, cos, radians, sin, sqrt
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -11,7 +12,7 @@ from app.db.models.agreements import Agreement
 from app.db.models.enums import AgreementStatus, JobStatus
 from app.db.models.jobs import Job
 from app.db.models.users import User, WorkerProfile, WorkerSkill
-from app.schemas.location_intelligence import ConsumerLocationIntelligence, RegionIntelligence, ResolvedLocation, WorkerLocationIntelligence
+from app.schemas.location_intelligence import ConsumerLocationIntelligence, NearbyWorkerSummary, RegionIntelligence, ResolvedLocation, WorkerLocationIntelligence
 
 
 GRID = 100
@@ -45,6 +46,42 @@ def _region_key(latitude: float, longitude: float) -> tuple[float, float]:
 
 def _available_worker(worker: WorkerProfile, locked_worker_ids: set) -> bool:
     return worker.id not in locked_worker_ids and worker.availability != "UNAVAILABLE"
+
+
+def _location_tokens(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {token for token in re.sub(r"[^a-z0-9]+", " ", str(value).lower()).split() if token}
+
+
+def _location_matches(left: str | None, right: str | None) -> bool:
+    left_tokens = _location_tokens(left)
+    right_tokens = _location_tokens(right)
+    if not left_tokens or not right_tokens:
+        return bool(left and right and (str(left).lower() in str(right).lower() or str(right).lower() in str(left).lower()))
+    return bool(left_tokens & right_tokens)
+
+
+def _is_worker_nearby(worker: WorkerProfile, target_latitude: float, target_longitude: float, radius_km: float = 25.0) -> bool:
+    if worker.working_latitude is None or worker.working_longitude is None:
+        return False
+    return _distance_km(float(worker.working_latitude), float(worker.working_longitude), target_latitude, target_longitude) <= radius_km
+
+
+def _worker_summary(worker: WorkerProfile) -> NearbyWorkerSummary:
+    return NearbyWorkerSummary(
+        id=str(worker.id),
+        name=worker.user.name if worker.user is not None else "Worker",
+        location=worker.working_location,
+        availability=worker.availability,
+        skills=[skill.skill.name for skill in worker.skills if skill.skill],
+    )
+
+
+def _worker_matches_category(worker: WorkerProfile, category: str) -> bool:
+    requested = _location_tokens(category)
+    skills = set().union(*(_location_tokens(skill.skill.name) for skill in worker.skills if skill.skill))
+    return bool(requested & skills)
 
 
 def region_intelligence(session: Session, category: str | None = None) -> list[RegionIntelligence]:
@@ -84,13 +121,31 @@ def consumer_intelligence(session: Session, location: str, category: str) -> Con
     coordinates = resolve_location(location)
     resolved = ResolvedLocation(location=location, latitude=coordinates[0] if coordinates else None, longitude=coordinates[1] if coordinates else None, resolved=coordinates is not None)
     if coordinates is None:
-        return ConsumerLocationIntelligence(location=resolved, category=category, nearby_worker_count=0, available_worker_count=0, supply_level="UNKNOWN", demand_level="UNKNOWN", regions=[])
+        workers = list(session.scalars(select(WorkerProfile).join(User).where(User.account_status == "ACTIVE").options(selectinload(WorkerProfile.skills).selectinload(WorkerSkill.skill))))
+        matching_workers = [
+            _worker_summary(worker)
+            for worker in workers
+            if worker.availability != "UNAVAILABLE" and _worker_matches_category(worker, category) and worker.working_location and _location_matches(worker.working_location, location)
+        ]
+        return ConsumerLocationIntelligence(location=resolved, category=category, nearby_worker_count=len(matching_workers), available_worker_count=len(matching_workers), supply_level="HIGH" if matching_workers else "LOW", demand_level="LOW", regions=[], nearby_workers=matching_workers[:12])
     regions = [item for item in region_intelligence(session, category) if _distance_km(coordinates[0], coordinates[1], item.latitude, item.longitude) <= 25]
     available = sum(item.available_worker_count for item in regions)
     demand = sum(item.active_demand for item in regions)
     supply_level = "HIGH" if available >= demand * 2 and available else "MODERATE" if available else "LOW"
     demand_level = "HIGH" if demand > available else "MODERATE" if demand else "LOW"
-    return ConsumerLocationIntelligence(location=resolved, category=category, nearby_worker_count=sum(item.worker_count for item in regions), available_worker_count=available, supply_level=supply_level, demand_level=demand_level, regions=regions[:12])
+    workers = list(session.scalars(select(WorkerProfile).join(User).where(User.account_status == "ACTIVE").options(selectinload(WorkerProfile.skills).selectinload(WorkerSkill.skill))))
+    nearby_workers = [
+        _worker_summary(worker)
+        for worker in workers
+        if worker.availability != "UNAVAILABLE" and _worker_matches_category(worker, category)
+        and (
+            (_is_worker_nearby(worker, coordinates[0], coordinates[1], 25.0))
+            or (worker.working_location and _location_matches(worker.working_location, location))
+        )
+    ]
+    nearby_count = sum(item.worker_count for item in regions) or len(nearby_workers)
+    available_count = available or len(nearby_workers)
+    return ConsumerLocationIntelligence(location=resolved, category=category, nearby_worker_count=nearby_count, available_worker_count=available_count, supply_level=supply_level, demand_level=demand_level, regions=regions[:12], nearby_workers=nearby_workers[:12])
 
 
 def worker_profile(session: Session, user: User) -> WorkerProfile:

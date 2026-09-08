@@ -224,6 +224,8 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+The backend resolves `backend/.env` from its configuration module, so the command may also be started from the repository root with `python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload` when the backend package is available on `PYTHONPATH`. The local frontend origins are explicitly configured for ports 5500, 5501, and 5502.
+
 ## Consumer frontend startup
 
 From the project root:
@@ -232,7 +234,7 @@ From the project root:
 python -m http.server 5500 --directory consumer-web
 ```
 
-Then open http://localhost:5500/ in the browser.
+Then open http://localhost:5500/ or http://127.0.0.1:5500/ in the browser.
 
 ## Worker frontend startup
 
@@ -242,7 +244,7 @@ From the project root:
 python -m http.server 5501 --directory worker-web
 ```
 
-Then open http://localhost:5501/ in the browser.
+Then open http://localhost:5501/ or http://127.0.0.1:5501/ in the browser.
 
 ## Admin frontend startup
 
@@ -252,7 +254,11 @@ From the project root:
 python -m http.server 5502 --directory admin-web
 ```
 
-Then open http://localhost:5502/ in the browser.
+Then open http://localhost:5502/ or http://127.0.0.1:5502/ in the browser.
+
+## Docker Compose
+
+`docker compose up --build` starts FastAPI on port 8000, Redis, the existing Celery worker, and the three static frontends on ports 5500, 5501, and 5502. Supabase PostgreSQL remains remote; provide database and secret values through the untracked `backend/.env` file.
 
 ## Alembic migrations
 

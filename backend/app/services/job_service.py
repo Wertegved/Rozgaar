@@ -157,8 +157,26 @@ def list_jobs(session: Session, user: User, query: JobListQuery) -> PaginatedJob
     statement = _job_query()
     count_statement = select(func.count()).select_from(Job)
     if user.role.value == "WORKER":
+        worker_profile = session.scalar(select(WorkerProfile).where(WorkerProfile.user_id == user.id))
         statement = statement.where(Job.status.in_([JobStatus.POSTED, JobStatus.APPLICATIONS]))
         count_statement = count_statement.where(Job.status.in_([JobStatus.POSTED, JobStatus.APPLICATIONS]))
+        if worker_profile and worker_profile.working_latitude is not None and worker_profile.working_longitude is not None:
+            statement = statement.where(
+                Job.latitude.is_not(None),
+                Job.longitude.is_not(None),
+                func.abs(Job.latitude - worker_profile.working_latitude) <= 0.25,
+                func.abs(Job.longitude - worker_profile.working_longitude) <= 0.25,
+            )
+            count_statement = count_statement.where(
+                Job.latitude.is_not(None),
+                Job.longitude.is_not(None),
+                func.abs(Job.latitude - worker_profile.working_latitude) <= 0.25,
+                func.abs(Job.longitude - worker_profile.working_longitude) <= 0.25,
+            )
+        elif worker_profile and worker_profile.working_location:
+            location_filter = f"%{worker_profile.working_location}%"
+            statement = statement.where(Job.location.ilike(location_filter))
+            count_statement = count_statement.where(Job.location.ilike(location_filter))
     elif user.role.value == "CONSUMER":
         profile = session.scalar(select(ConsumerProfile).where(ConsumerProfile.user_id == user.id))
         if profile is None:

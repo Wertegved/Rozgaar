@@ -1,0 +1,79 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      CORS_ORIGINS: http://localhost:5500,http://127.0.0.1:5500,http://localhost:5501,http://127.0.0.1:5501,http://localhost:5502,http://127.0.0.1:5502
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      REDIS_URL: redis://redis:6379/0
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  celery:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      REDIS_URL: redis://redis:6379/0
+    command: celery -A celery_app.celery_app worker --loglevel=info
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  consumer:
+    image: python:3.12-slim
+    working_dir: /site
+    volumes:
+      - ./consumer-web:/site:ro
+    command: python -m http.server 5500 --bind 0.0.0.0
+    ports:
+      - "5500:5500"
+    restart: unless-stopped
+
+  worker:
+    image: python:3.12-slim
+    working_dir: /site
+    volumes:
+      - ./worker-web:/site:ro
+    command: python -m http.server 5501 --bind 0.0.0.0
+    ports:
+      - "5501:5501"
+    restart: unless-stopped
+
+  admin:
+    image: python:3.12-slim
+    working_dir: /site
+    volumes:
+      - ./admin-web:/site:ro
+    command: python -m http.server 5502 --bind 0.0.0.0
+    ports:
+      - "5502:5502"
+    restart: unless-stopped
