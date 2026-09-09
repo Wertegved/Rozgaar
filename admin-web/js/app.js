@@ -7,6 +7,10 @@ const state = {
   notifications: [],
   unreadCount: 0,
   complaints: [],
+  users: [],
+  usersPage: 1,
+  usersPageSize: 20,
+  usersTotal: 0,
   disputes: [],
   payments: [],
   paymentSummary: 0,
@@ -217,6 +221,18 @@ function bindGlobalEvents() {
       case 'refresh-data':
         await refreshData();
         break;
+      case 'refresh-users':
+        await loadUsersView();
+        break;
+      case 'users-prev':
+        if (state.usersPage > 1) { state.usersPage -= 1; await loadUsersView(); }
+        break;
+      case 'users-next':
+        if (state.usersPage * state.usersPageSize < state.usersTotal) { state.usersPage += 1; await loadUsersView(); }
+        break;
+      case 'open-admin-user':
+        await openAdminUser(action.dataset.id);
+        break;
       case 'open-notifications':
         await openNotificationsDrawer();
         break;
@@ -415,6 +431,7 @@ function renderMainContent() {
 
   if (state.view === 'users') {
     panel.innerHTML = renderUsersView();
+    loadUsersView();
     return;
   }
 
@@ -1512,14 +1529,40 @@ function renderUsersView() {
           <h2>Workers and consumers</h2>
         </div>
       </div>
-      <div class="blank-card">
-        <div class="eyebrow">Backend limitation</div>
-        <strong>No worker or consumer directory endpoint is available in this backend.</strong>
-        <p>The current API surface exposes only the authenticated user, job listings, payment records, complaints, and disputes. The admin UI intentionally avoids exposing private data or inventing a directory.</p>
+      <div class="filters-row">
+        <input id="admin-user-search" placeholder="Search name, email, or phone" aria-label="Search users">
+        <select id="admin-user-role" aria-label="Filter role"><option value="">All roles</option><option value="WORKER">Workers</option><option value="CONSUMER">Consumers</option></select>
+        <select id="admin-user-status" aria-label="Filter status"><option value="">All statuses</option><option value="ACTIVE">Active</option><option value="SUSPENDED">Suspended</option></select>
+        <button class="secondary-button" data-action="refresh-users">Refresh</button>
       </div>
+      <div id="admin-users-list" class="blank-card">Loading users...</div>
+      <div class="pagination-row"><button class="secondary-button" data-action="users-prev">Previous</button><span id="admin-users-page">Page 1</span><button class="secondary-button" data-action="users-next">Next</button></div>
     </div>
   `;
 }
+
+async function loadUsersView() {
+  const search = $('#admin-user-search')?.value.trim() || '';
+  const role = $('#admin-user-role')?.value || '';
+  const accountStatus = $('#admin-user-status')?.value || '';
+  const params = new URLSearchParams({ page: String(state.usersPage), page_size: String(state.usersPageSize) });
+  if (search) params.set('search', search);
+  if (role) params.set('role', role);
+  if (accountStatus) params.set('account_status', accountStatus);
+  try {
+    const data = await api(`/admin/users?${params}`);
+    state.users = data.items || [];
+    state.usersTotal = data.total || 0;
+    const list = $('#admin-users-list');
+    if (list) list.innerHTML = state.users.length ? state.users.map(user => `<button class="list-row" data-action="open-admin-user" data-id="${user.id}"><span><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.email || user.phone)} · ${escapeHtml(user.role)} · ${escapeHtml(user.account_status)}</small></span><span>${user.rating_average ? `★ ${Number(user.rating_average).toFixed(1)} (${user.review_count})` : 'No reviews'}</span></button>`).join('') : '<div class="empty-state">No users match the current filters.</div>';
+    if ($('#admin-users-page')) $('#admin-users-page').textContent = `Page ${data.page} · ${data.total} users`;
+    bindUserFilters();
+  } catch (error) { const list = $('#admin-users-list'); if (list) list.textContent = error.message; }
+}
+
+function bindUserFilters() { ['admin-user-search', 'admin-user-role', 'admin-user-status'].forEach(id => { const node = $(`#${id}`); if (node && !node.dataset.bound) { node.dataset.bound = 'true'; node.addEventListener('change', () => { state.usersPage = 1; loadUsersView(); }); if (id === 'admin-user-search') node.addEventListener('keydown', event => { if (event.key === 'Enter') { state.usersPage = 1; loadUsersView(); } }); } }); }
+
+async function openAdminUser(userId) { const user = await api(`/admin/users/${userId}`); openDrawer(`<div class="drawer-head"><div class="eyebrow">User detail</div><h2>${escapeHtml(user.name)}</h2><button type="button" class="close-button" data-action="close-drawer" aria-label="Close">×</button></div><div class="drawer-body"><div class="detail-grid"><div class="detail-box"><span>Role</span><strong>${escapeHtml(user.role)}</strong></div><div class="detail-box"><span>Status</span><strong>${escapeHtml(user.account_status)}</strong></div><div class="detail-box"><span>Email</span><strong>${escapeHtml(user.email || 'Not listed')}</strong></div><div class="detail-box"><span>Rating</span><strong>${user.rating_average ? `${Number(user.rating_average).toFixed(1)} (${user.review_count})` : 'No reviews'}</strong></div><div class="detail-box"><span>Jobs</span><strong>${user.jobs_count}</strong></div><div class="detail-box"><span>Applications</span><strong>${user.applications_count}</strong></div></div></div>`, 'User detail'); }
 
 function resolveStatusClass(status) {
   switch (status) {

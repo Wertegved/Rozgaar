@@ -5,26 +5,33 @@
   let refreshTimer;
   let stopped = true;
   let options;
+  let supabaseModule;
 
   const loadClient = () => new Promise((resolve, reject) => {
-    if (window.supabase) return resolve(window.supabase);
+    if (supabaseModule) return resolve(supabaseModule);
+    if (window.supabase) { supabaseModule = window.supabase; return resolve(supabaseModule); }
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-    script.onload = () => resolve(window.supabase);
+    script.onload = () => { supabaseModule = window.supabase; resolve(supabaseModule); };
     script.onerror = reject;
     document.head.appendChild(script);
   });
-  const stop = async () => { clearTimeout(reconnectTimer); clearTimeout(refreshTimer); if (client && channel) await client.removeChannel(channel); client = null; channel = null; };
+  const removeChannel = async () => { if (client && channel) await client.removeChannel(channel); channel = null; };
+  const stop = async () => { clearTimeout(reconnectTimer); clearTimeout(refreshTimer); await removeChannel(); client = null; };
   const connect = async () => {
     if (stopped || !options?.token || !options?.user?.id) return;
-    await stop();
+    clearTimeout(reconnectTimer);
+    clearTimeout(refreshTimer);
+    await removeChannel();
     try {
       const response = await fetch(`${options.apiBase}/realtime/token`, { headers: { Authorization: `Bearer ${options.token}` } });
       const config = await response.json();
       if (!response.ok) throw new Error(config.detail || 'Realtime authorization failed.');
       const supabase = await loadClient();
-      client = supabase.createClient(config.supabase_url, config.supabase_anon_key, { auth: { persistSession: false, autoRefreshToken: false } });
-      client.realtime.setAuth(config.access_token);
+      if (!client) client = supabase.createClient(config.supabase_url, config.supabase_anon_key, {
+        auth: { persistSession: false, autoRefreshToken: false },
+        accessToken: async () => config.access_token,
+      });
       channel = client.channel(config.channel, { config: { private: true } }).on('broadcast', { event: 'rozgaar.event' }, event => options.onEvent?.(event.payload)).subscribe(status => {
         options.onStatus?.(status);
         if (status === 'SUBSCRIBED') refreshTimer = setTimeout(connect, 12 * 60 * 1000);

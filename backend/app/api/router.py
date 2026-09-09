@@ -12,6 +12,7 @@ from app.api.issues import router as issues_router
 from app.api.notifications import router as notifications_router
 from app.api.location_intelligence import router as location_intelligence_router
 from app.api.realtime import router as realtime_router
+from app.api.admin_users import router as admin_users_router
 from app.health.router import router as health_router
 
 
@@ -29,3 +30,4 @@ router.include_router(issues_router)
 router.include_router(notifications_router)
 router.include_router(location_intelligence_router)
 router.include_router(realtime_router)
+router.include_router(admin_users_router)
