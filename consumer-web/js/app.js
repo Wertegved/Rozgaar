@@ -80,7 +80,7 @@ openPostDrawer = function () {
     panel.textContent = 'Resolving area intelligence…';
     try {
       const data = await api(`/location-intelligence/consumer?location=${encodeURIComponent(location)}&category=${encodeURIComponent(categoryChoices())}`);
-      panel.innerHTML = data.location.resolved ? `<strong>${data.available_worker_count} available nearby</strong><span>Supply ${esc(data.supply_level.toLowerCase())} · Demand ${esc(data.demand_level.toLowerCase())}</span>` : '<strong>Area could not be resolved yet.</strong><span>Use a recognizable area and city; no coordinates were stored.</span>';
+      panel.innerHTML = data.location.resolved ? (data.nearby_worker_count ? `<strong>${data.available_worker_count} available nearby</strong><span>Supply ${esc(data.supply_level.toLowerCase())} · Demand ${esc(data.demand_level.toLowerCase())}</span>` : '<strong>No matching workers nearby right now.</strong><span>You can still post this job. Eligible Workers may become available later.</span>') : '<strong>Area could not be resolved yet.</strong><span>Use a recognizable area and city; no coordinates were stored.</span>';
     } catch (error) { panel.textContent = error.message; }
   };
   if (locationInput) locationInput.addEventListener('blur', refreshLocationIntelligence);

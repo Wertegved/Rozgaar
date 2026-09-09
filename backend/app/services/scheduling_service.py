@@ -33,6 +33,43 @@ def _overlap_clause(start_time: time, end_time: time):
     return and_(Agreement.start_time < end_time, Agreement.end_time > start_time)
 
 
+def _locked_schedule_conflict(
+    session: Session,
+    worker_id: UUID,
+    scheduled_date: date,
+    start_time: time,
+    end_time: time,
+    lock: bool = False,
+) -> Agreement | None:
+    statement = select(Agreement).where(
+        Agreement.worker_id == worker_id,
+        Agreement.status.in_([AgreementStatus.PENDING, AgreementStatus.ACTIVE]),
+        Agreement.agreed_date == scheduled_date,
+        _overlap_clause(start_time, end_time),
+    )
+    if lock:
+        statement = statement.with_for_update()
+    return session.scalar(statement)
+
+
+def validate_worker_application_schedule(
+    session: Session,
+    worker_id: UUID,
+    scheduled_date: date,
+    start_time: time,
+    end_time: time,
+) -> None:
+    if end_time <= start_time:
+        raise APIError(422, "Job end time must be after start time")
+    conflict = _locked_schedule_conflict(session, worker_id, scheduled_date, start_time, end_time)
+    if conflict is not None:
+        raise APIError(
+            409,
+            f"This job overlaps with your scheduled work on {conflict.agreed_date.isoformat()} "
+            f"from {conflict.start_time.strftime('%H:%M')} to {conflict.end_time.strftime('%H:%M')}.",
+        )
+
+
 def validate_worker_schedule(
     session: Session,
     worker_id: UUID,
@@ -53,14 +90,7 @@ def validate_worker_schedule(
     if windows and not any(window.start_time <= start_time and window.end_time >= end_time for window in available_windows):
         raise APIError(409, "Worker is not available for the agreed time")
 
-    conflict = session.scalar(
-        select(Agreement.id).where(
-            Agreement.worker_id == worker_id,
-            Agreement.status.in_([AgreementStatus.PENDING, AgreementStatus.ACTIVE]),
-            Agreement.agreed_date == scheduled_date,
-            _overlap_clause(start_time, end_time),
-        ).with_for_update()
-    )
+    conflict = _locked_schedule_conflict(session, worker_id, scheduled_date, start_time, end_time, lock=True)
     if conflict is not None:
         raise APIError(409, "Worker already has an overlapping scheduled agreement")
 

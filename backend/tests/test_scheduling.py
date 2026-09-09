@@ -110,13 +110,31 @@ def test_hiring_requires_availability_and_rolls_back(schedule_context: dict[str,
         },
     )
     assert availability.status_code == 201
-    second_application = apply(client, schedule_context["other_job"], worker)
-    unavailable = client.post(f"/api/v1/applications/{second_application['id']}/accept", headers=auth(schedule_context["other_consumer"]))
-    assert unavailable.status_code == 409  # overlap with the first active agreement
+    unavailable = client.post(f"/api/v1/jobs/{schedule_context['other_job'].id}/applications", headers=auth(worker), json={"proposed_price": "1200"})
+    assert unavailable.status_code == 409
 
     session = schedule_context["factory"]()
     assert session.scalar(select(Agreement).where(Agreement.job_id == schedule_context["other_job"].id)) is None
     session.close()
+
+
+def test_application_schedule_boundaries_and_dates_are_allowed(schedule_context: dict[str, object]) -> None:
+    client = schedule_context["client"]
+    worker = schedule_context["worker"]
+    consumer = schedule_context["consumer"]
+    other_consumer = schedule_context["other_consumer"]
+    scheduled = schedule_context["scheduled"]
+    first = apply(client, schedule_context["job"], worker)
+    assert client.post(f"/api/v1/applications/{first['id']}/accept", headers=auth(consumer)).status_code == 200
+    session = schedule_context["factory"]()
+    other_profile = session.scalar(select(ConsumerProfile).where(ConsumerProfile.user_id == other_consumer.id))
+    boundary = Job(consumer_id=other_profile.id, category="cleaning", title="Boundary job", description="Clean", location="Mumbai", required_worker_count=1, minimum_platform_cost=Decimal("500"), emergency_level=EmergencyLevel.RELAXED, scheduled_date=scheduled, start_time=time(12), end_time=time(14), status=JobStatus.POSTED)
+    different_day = Job(consumer_id=other_profile.id, category="cleaning", title="Different day job", description="Clean", location="Mumbai", required_worker_count=1, minimum_platform_cost=Decimal("500"), emergency_level=EmergencyLevel.RELAXED, scheduled_date=scheduled + timedelta(days=1), start_time=time(10), end_time=time(12), status=JobStatus.POSTED)
+    session.add_all([boundary, different_day])
+    session.commit()
+    session.close()
+    assert client.post(f"/api/v1/jobs/{boundary.id}/applications", headers=auth(worker), json={"proposed_price": "500"}).status_code == 201
+    assert client.post(f"/api/v1/jobs/{different_day.id}/applications", headers=auth(worker), json={"proposed_price": "500"}).status_code == 201
 
 
 def test_exact_boundary_is_allowed_and_schedule_is_private(schedule_context: dict[str, object]) -> None:

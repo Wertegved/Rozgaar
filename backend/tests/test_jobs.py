@@ -126,6 +126,17 @@ def test_consumer_can_create_job_and_owner_is_server_derived(job_context: dict[s
     session.close()
 
 
+def test_consumer_can_post_when_no_worker_is_nearby(job_context: dict[str, object]) -> None:
+    client = job_context["client"]
+    consumer = job_context["consumer"]
+    payload = create_payload()
+    payload.update({"category": "plumbing", "title": "No nearby supply job", "location": "New Town, Kolkata"})
+    response = client.post("/api/v1/jobs", headers=headers(consumer), json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "POSTED"
+
+
 def test_worker_and_admin_cannot_create_jobs(job_context: dict[str, object]) -> None:
     client = job_context["client"]
     assert client.post("/api/v1/jobs", headers=headers(job_context["worker"]), json=create_payload()).status_code == 403

@@ -1,12 +1,12 @@
 from math import ceil
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import APIError
 from app.db.models.agreements import Agreement
-from app.db.models.enums import JobStatus, UserRole
+from app.db.models.enums import AgreementStatus, JobStatus, UserRole
 from app.db.models.jobs import Job, JobImage, JobRequirement
 from app.db.models.skills import Skill
 from app.db.models.users import ConsumerProfile, User, WorkerProfile
@@ -121,8 +121,15 @@ def get_job(session: Session, user: User, job_id: UUID) -> JobResponse:
     owner_id = session.scalar(select(ConsumerProfile.user_id).where(ConsumerProfile.id == job.consumer_id))
     if owner_id == user.id:
         return _job_response(job)
-    if user.role is UserRole.WORKER and job.status in {JobStatus.POSTED, JobStatus.APPLICATIONS}:
-        return _job_response(job)
+    if user.role is UserRole.WORKER and job.status in {JobStatus.POSTED, JobStatus.APPLICATIONS, JobStatus.ACCEPTED}:
+        accepted_count = session.scalar(
+            select(func.count(Agreement.id)).where(
+                Agreement.job_id == job.id,
+                Agreement.status.in_(["PENDING", "ACTIVE"]),
+            )
+        ) or 0
+        if job.status is not JobStatus.ACCEPTED or accepted_count < job.required_worker_count:
+            return _job_response(job)
     participant = session.scalar(
         select(WorkerProfile.user_id)
         .join(Agreement, Agreement.worker_id == WorkerProfile.id)
@@ -158,8 +165,21 @@ def list_jobs(session: Session, user: User, query: JobListQuery) -> PaginatedJob
     count_statement = select(func.count()).select_from(Job)
     if user.role.value == "WORKER":
         worker_profile = session.scalar(select(WorkerProfile).where(WorkerProfile.user_id == user.id))
-        statement = statement.where(Job.status.in_([JobStatus.POSTED, JobStatus.APPLICATIONS]))
-        count_statement = count_statement.where(Job.status.in_([JobStatus.POSTED, JobStatus.APPLICATIONS]))
+        accepted_count = (
+            select(func.count(Agreement.id))
+            .where(
+                Agreement.job_id == Job.id,
+                Agreement.status.in_([AgreementStatus.PENDING, AgreementStatus.ACTIVE]),
+            )
+            .correlate(Job)
+            .scalar_subquery()
+        )
+        open_for_workers = or_(
+            Job.status.in_([JobStatus.POSTED, JobStatus.APPLICATIONS]),
+            and_(Job.status == JobStatus.ACCEPTED, accepted_count < Job.required_worker_count),
+        )
+        statement = statement.where(open_for_workers)
+        count_statement = count_statement.where(open_for_workers)
         if worker_profile and worker_profile.working_latitude is not None and worker_profile.working_longitude is not None:
             statement = statement.where(
                 Job.latitude.is_not(None),

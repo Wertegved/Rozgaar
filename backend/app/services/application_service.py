@@ -21,7 +21,7 @@ from app.schemas.applications import (
     CounterOfferRequest,
     NegotiationResponse,
 )
-from app.services.scheduling_service import validate_worker_schedule
+from app.services.scheduling_service import validate_worker_application_schedule, validate_worker_schedule
 from app.db.models.enums import NotificationType
 from app.services.notification_service import NotificationService
 
@@ -169,6 +169,8 @@ def apply_to_job(session: Session, user: User, job_id: UUID, data: ApplicationCr
         raise APIError(403, "A worker cannot apply to their own job")
     if session.scalar(select(Application.id).where(Application.job_id == job_id, Application.worker_id == worker.id)):
         raise APIError(409, "You have already applied to this job")
+    if job.scheduled_date is not None and job.start_time is not None and job.end_time is not None:
+        validate_worker_application_schedule(session, worker.id, job.scheduled_date, job.start_time, job.end_time)
 
     item = Application(
         job_id=job_id,
