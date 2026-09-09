@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_anon_key: str | None = None
     supabase_service_role_key: str | None = None
+    supabase_jwt_secret: str = ""
     supabase_db_url: str | None = None
     supabase_db_direct_url: str | None = None
     jwt_secret_key: str = ""

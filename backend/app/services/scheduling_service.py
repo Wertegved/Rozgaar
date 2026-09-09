@@ -10,6 +10,10 @@ from app.db.models.availability import WorkerAvailability
 from app.db.models.enums import AgreementStatus, AvailabilityStatus
 from app.db.models.jobs import Job
 from app.db.models.users import ConsumerProfile, User, WorkerProfile
+from app.db.models.enums import AccountStatus, UserRole
+from app.realtime.events import RealtimeEvent
+from app.realtime.models import RealtimeResourceScope, RealtimeSubject
+from app.realtime.service import RealtimeDelivery, build_event
 from app.schemas.scheduling import (
     AvailabilityCreateRequest,
     AvailabilityResponse,
@@ -111,6 +115,7 @@ def create_availability(session: Session, user: User, data: AvailabilityCreateRe
     session.add(item)
     session.commit()
     session.refresh(item)
+    _publish_availability_update(session, user)
     return _availability_response(item)
 
 
@@ -146,6 +151,7 @@ def update_availability(session: Session, user: User, availability_id: UUID, dat
         setattr(item, field, value)
     session.commit()
     session.refresh(item)
+    _publish_availability_update(session, user)
     return _availability_response(item)
 
 
@@ -158,6 +164,27 @@ def delete_availability(session: Session, user: User, availability_id: UUID) -> 
         raise APIError(403, "You may only modify your own availability")
     session.delete(item)
     session.commit()
+    _publish_availability_update(session, user)
+
+
+def _publish_availability_update(session: Session, worker_user: User) -> None:
+    recipients = list(
+        session.scalars(
+            select(User).where(User.account_status == AccountStatus.ACTIVE)
+        ).all()
+    )
+    subjects = [RealtimeSubject(item.id, item.role) for item in recipients]
+    RealtimeDelivery().publish(
+        build_event(
+            RealtimeEvent.AVAILABILITY_UPDATED,
+            {"status": "updated"},
+            subjects,
+            RealtimeResourceScope(
+                participant_user_ids=frozenset(item.id for item in recipients),
+                worker_user_id=worker_user.id,
+            ),
+        )
+    )
 
 
 def worker_schedule(session: Session, user: User, upcoming: bool = False) -> list[ScheduleResponse]:

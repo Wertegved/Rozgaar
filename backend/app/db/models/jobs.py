@@ -18,6 +18,7 @@ class Job(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_jobs_status", "status"),
         Index("ix_jobs_scheduled_date", "scheduled_date"),
         Index("ix_jobs_category", "category"),
+        Index("ix_jobs_coordinates", "latitude", "longitude"),
     )
 
     consumer_id: Mapped[UUID] = mapped_column(ForeignKey("consumer_profiles.id", ondelete="RESTRICT"))

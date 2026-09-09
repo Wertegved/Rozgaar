@@ -1,3 +1,5 @@
+function startWorkerRealtime() { window.RozgaarRealtime?.start({ apiBase: API_BASE, token: state.token, user: state.user, onEvent: () => loadCore(), onStatus: status => document.body.dataset.realtimeStatus = status }); }
+
 const API_BASE = localStorage.getItem('rozgaar_api_base') || 'http://127.0.0.1:8000/api/v1';
 const state = { token: localStorage.getItem('rozgaar_worker_token') || localStorage.getItem('rozgaar_token'), user: null, jobs: [], applications: [], schedule: [], availability: [], payments: [], notifications: [], reviews: [], complaints: [], view: 'home', eventsBound: false };
 let workerMap = null;
@@ -17,6 +19,7 @@ async function api(path, options = {}) {
   if (response.status === 204) return null;
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body?.error?.detail || body?.detail || 'Something went wrong.');
+  if (path === '/auth/me' && body?.id && state.token) { state.user = body; startWorkerRealtime(); }
   return body;
 }
 
@@ -234,4 +237,5 @@ openJob = async function (id) { await existingWorkerOpenJob(id); const job = sta
 opportunityList = function (items) { if (!items.length) return '<div class="empty"><strong>Nothing matching your current view.</strong><span>Try a broader search or reset your filters.</span></div>'; return items.map(job => `<article class="opportunity"><div><h3 class="opportunity-title">${esc(job.title)}</h3><div class="opportunity-meta">${esc(job.category)} · ${esc(job.location)} · ${dateLabel(job.scheduled_date)} ${job.start_time ? `· ${timeLabel(job.start_time)}–${timeLabel(job.end_time)}` : ''}</div><div class="opportunity-facts"><span>${job.required_worker_count} worker${job.required_worker_count === 1 ? '' : 's'}</span><span>${esc(label(job.emergency_level))}</span><span>Reference ${money(job.minimum_platform_cost)}</span></div>${job.consumer_name ? `<div class="support-note">Consumer: ${esc(job.consumer_name)} · ${job.consumer_rating ? `★ ${Number(job.consumer_rating).toFixed(1)} (${job.consumer_review_count} reviews)` : 'No reviews yet'}</div>` : ''}</div><div class="opportunity-side"><strong>${money(job.minimum_platform_cost)}</strong><button class="button primary small" data-action="open-job" data-id="${job.id}">View job →</button></div></article>`).join(''); };
 const existingWorkerRenderHistory = renderHistory;
 renderHistory = function () { existingWorkerRenderHistory(); $$('.schedule-row').forEach(row => { const title = $('h4', row)?.textContent; const application = state.applications.find(item => item.job_title === title && item.status === 'ACCEPTED'); const job = application ? state.jobs.find(item => item.id === application.job_id) : null; if (!job?.consumer_id) return; const review = state.reviews.find(item => item.job_id === job.id && item.reviewed_user_id === job.consumer_id); const side = $('.row-side', row); if (side) side.insertAdjacentHTML('beforeend', review ? `<small>You gave ${review.rating}/5 to ${esc(job.consumer_name || 'the Consumer')}</small>` : `<button class="button secondary small" data-action="worker-review" data-job="${job.id}" data-user="${job.consumer_id}" data-name="${esc(job.consumer_name || 'the Consumer')}">Rate Consumer</button>`); }); };
+document.addEventListener('click', event => { if (event.target.closest('[data-action="logout"]')) window.RozgaarRealtime?.stop(); });
 shell();

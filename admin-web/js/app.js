@@ -346,6 +346,7 @@ async function refreshData() {
     }
 
     renderShell();
+    window.RozgaarRealtime?.start({ apiBase: API_BASE, token: state.token, user: state.user, onEvent: () => refreshData(), onStatus: status => document.body.dataset.realtimeStatus = status });
     toast('Operations data refreshed.');
   } catch (error) {
     state.user = null;
@@ -485,6 +486,7 @@ async function handleLogin(form) {
 }
 
 function signOut() {
+  window.RozgaarRealtime?.stop();
   state.token = null;
   state.user = null;
   localStorage.removeItem('rozgaar_token');

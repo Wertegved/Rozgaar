@@ -38,6 +38,7 @@ class WorkerProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "worker_profiles"
     __table_args__ = (
         CheckConstraint("working_radius_km IS NULL OR working_radius_km >= 0", name="ck_worker_radius_non_negative"),
+        Index("ix_worker_profiles_working_coordinates", "working_latitude", "working_longitude"),
     )
 
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), unique=True)
