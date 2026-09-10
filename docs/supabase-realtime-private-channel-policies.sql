@@ -4,11 +4,14 @@
 
 -- alter table if exists realtime.messages enable row level security;
 
-drop policy if exists rozgaar_realtime_private_channel_select on realtime.messages;
-create policy rozgaar_realtime_private_channel_select
+drop policy if exists "rozgaar_realtime_private_channel_select"
+on realtime.messages;
+
+create policy "rozgaar_realtime_private_channel_select"
 on realtime.messages
 for select
 to authenticated
 using (
-  topic = 'user:' || auth.uid()::text
+  realtime.topic() = 'user:' || auth.uid()::text
+  and extension = 'broadcast'
 );

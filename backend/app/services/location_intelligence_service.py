@@ -1,5 +1,6 @@
 import json
 import re
+from collections import Counter
 from math import atan2, cos, radians, sin, sqrt
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -40,8 +41,49 @@ def _distance_km(first_lat: float, first_lon: float, second_lat: float, second_l
     return 6371.0 * 2 * atan2(sqrt(value), sqrt(1 - value))
 
 
+CITY_TOKENS = {
+    "ahmedabad",
+    "bangalore",
+    "chennai",
+    "delhi",
+    "gurugram",
+    "hyderabad",
+    "jaipur",
+    "kolkata",
+    "mumbai",
+    "noida",
+    "pune",
+    "thane",
+}
+
+
+def _canonical_region_key(value: str | None) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(value or "Regional area").lower()).strip()
+    return " ".join(normalized.split()) or "regional area"
+
+
+def _canonical_region_label(value: str | None) -> str:
+    key = _canonical_region_key(value)
+    if key == "regional area":
+        return "Regional area"
+    tokens = key.split()
+    if len(tokens) > 1 and tokens[-1] in CITY_TOKENS:
+        area_tokens = tokens[:-1]
+        area = " ".join(part.capitalize() for part in area_tokens)
+        city = tokens[-1].capitalize()
+        return f"{area}, {city}"
+    return " ".join(part.capitalize() for part in tokens)
+
+
 def _region_key(latitude: float, longitude: float) -> tuple[float, float]:
     return round(latitude * GRID) / GRID, round(longitude * GRID) / GRID
+
+
+def _canonical_coordinates(votes: Counter[tuple[float, float]]) -> tuple[float, float]:
+    if not votes:
+        return 0.0, 0.0
+    (latitude, longitude), _ = max(votes.items(), key=lambda item: (item[1], abs(item[0][0]) + abs(item[0][1])))
+    return float(latitude), float(longitude)
 
 
 def _available_worker(worker: WorkerProfile, locked_worker_ids: set) -> bool:
@@ -88,25 +130,32 @@ def region_intelligence(session: Session, category: str | None = None) -> list[R
     workers = list(session.scalars(select(WorkerProfile).join(User).where(User.account_status == "ACTIVE").options(selectinload(WorkerProfile.skills).selectinload(WorkerSkill.skill))))
     jobs = list(session.scalars(select(Job).where(Job.latitude.is_not(None), Job.longitude.is_not(None))))
     locked_worker_ids = set(session.scalars(select(Agreement.worker_id).where(Agreement.status.in_([AgreementStatus.PENDING, AgreementStatus.ACTIVE]))))
-    regions: dict[tuple[float, float], dict] = {}
+    regions: dict[str, dict] = {}
     for worker in workers:
         if worker.working_latitude is None or worker.working_longitude is None:
             continue
         skill_names = [item.skill.name.lower() for item in worker.skills if item.skill]
         if category and category.lower() not in skill_names and category.lower() not in (worker.working_location or "").lower():
             continue
-        key = _region_key(float(worker.working_latitude), float(worker.working_longitude))
-        bucket = regions.setdefault(key, {"workers": 0, "available": 0, "jobs": [], "label": worker.working_location or "Regional area"})
+        label = _canonical_region_label(worker.working_location)
+        key = _canonical_region_key(label)
+        bucket = regions.setdefault(key, {"workers": 0, "available": 0, "jobs": [], "label": label, "coord_votes": Counter()})
+        bucket["label"] = label
         bucket["workers"] += 1
         bucket["available"] += int(_available_worker(worker, locked_worker_ids))
+        bucket["coord_votes"][(float(worker.working_latitude), float(worker.working_longitude))] += 1
     for job in jobs:
         if category and category.lower() not in job.category.lower():
             continue
-        key = _region_key(float(job.latitude), float(job.longitude))
-        bucket = regions.setdefault(key, {"workers": 0, "available": 0, "jobs": [], "label": job.location})
+        label = _canonical_region_label(job.location)
+        key = _canonical_region_key(label)
+        bucket = regions.setdefault(key, {"workers": 0, "available": 0, "jobs": [], "label": label, "coord_votes": Counter()})
+        bucket["label"] = label
         bucket["jobs"].append(job)
+        bucket["coord_votes"][(float(job.latitude), float(job.longitude))] += 1
     result = []
-    for (latitude, longitude), bucket in regions.items():
+    for bucket in regions.values():
+        latitude, longitude = _canonical_coordinates(bucket["coord_votes"])
         relevant_jobs = bucket["jobs"]
         demand = sum(job.required_worker_count for job in relevant_jobs if job.status in OPEN_STATUSES)
         available = bucket["available"]

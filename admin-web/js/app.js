@@ -1042,13 +1042,39 @@ async function resolveAdminSearchLocation(location) {
   return null;
 }
 
+function canonicalizeRegionKey(value) {
+  const normalized = String(value || '').trim().replace(/[^a-z0-9]+/gi, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  return normalized || 'regional area';
+}
+
+function canonicalizeRegionLabel(value) {
+  const key = canonicalizeRegionKey(value);
+  if (!key || key === 'regional area') return 'Regional area';
+  const tokens = key.split(' ');
+  const cityNames = new Set(['ahmedabad', 'bangalore', 'chennai', 'delhi', 'gurugram', 'hyderabad', 'jaipur', 'kolkata', 'mumbai', 'noida', 'pune', 'thane']);
+  if (tokens.length > 1 && cityNames.has(tokens[tokens.length - 1])) {
+    const area = tokens.slice(0, -1).map((token) => token.charAt(0).toUpperCase() + token.slice(1)).join(' ');
+    const city = tokens[tokens.length - 1].charAt(0).toUpperCase() + tokens[tokens.length - 1].slice(1);
+    return `${area}, ${city}`;
+  }
+  return tokens.map((token) => token.charAt(0).toUpperCase() + token.slice(1)).join(' ');
+}
+
 async function normalizeMapRegions(rawRegions) {
   const grouped = new Map();
-  rawRegions.filter((region) => region && typeof region === 'object' && Number.isFinite(region.latitude) && Number.isFinite(region.longitude)).forEach((region) => {
-    const key = String(region.region || '').trim().toLowerCase().replace(/\s+/g, ' ');
-    if (!key) return;
+
+  rawRegions.filter((region) => region && typeof region === 'object').forEach((region) => {
+    const latitude = Number(region.latitude);
+    const longitude = Number(region.longitude);
+    const label = canonicalizeRegionLabel(region.region || '');
+    const key = canonicalizeRegionKey(label);
+    if (!key || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
     const current = grouped.get(key) || {
       ...region,
+      region: label,
+      latitude,
+      longitude,
       worker_count: 0,
       available_worker_count: 0,
       relevant_job_count: 0,
@@ -1058,6 +1084,7 @@ async function normalizeMapRegions(rawRegions) {
       coordinateSource: null,
       records: [],
     };
+
     current.records.push(region);
     current.worker_count += Number(region.worker_count || 0);
     current.available_worker_count += Number(region.available_worker_count || 0);
@@ -1065,39 +1092,39 @@ async function normalizeMapRegions(rawRegions) {
     current.active_demand += Number(region.active_demand || 0);
     current.ongoing_job_count += Number(region.ongoing_job_count || 0);
     current.completed_job_count += Number(region.completed_job_count || 0);
-    if (!current.coordinateSource || Number(region.active_demand || 0) > Number(current.coordinateSource.active_demand || 0) || (Number(region.active_demand || 0) === Number(current.coordinateSource.active_demand || 0) && Number(region.worker_count || 0) > Number(current.coordinateSource.worker_count || 0))) {
-      current.latitude = region.latitude;
-      current.longitude = region.longitude;
+
+    const candidateScore = (Number(region.active_demand) || 0) * 5 + (Number(region.worker_count) || 0) * 2 + (Number(region.relevant_job_count) || 0);
+    const currentScore = current.coordinateSource ? ((Number(current.coordinateSource.active_demand) || 0) * 5 + (Number(current.coordinateSource.worker_count) || 0) * 2 + (Number(current.coordinateSource.relevant_job_count) || 0)) : -Infinity;
+    if (!current.coordinateSource || candidateScore > currentScore) {
+      current.latitude = latitude;
+      current.longitude = longitude;
       current.coordinateSource = region;
+      current.region = label;
     }
+
     grouped.set(key, current);
   });
-  return Promise.all([...grouped.values()].map(async (region) => {
-    const coordinates = await resolveCanonicalRegionCoordinates(region.region, region.records);
-    region.latitude = coordinates[0];
-    region.longitude = coordinates[1];
+
+  return [...grouped.values()].map((region) => {
     const ratio = region.available_worker_count ? Number((region.active_demand / region.available_worker_count).toFixed(2)) : null;
     const state = region.active_demand && !region.available_worker_count ? 'UNDERSERVED' : ratio && ratio > 1 ? 'SHORTAGE' : region.available_worker_count && ratio !== null && ratio < 0.5 ? 'OVERSUPPLIED' : 'BALANCED';
-    const { records, coordinateSource, ...normalized } = region;
-    return { ...normalized, supply_demand_ratio: ratio, state, opportunity_score: Number(Math.min(100, region.active_demand / Math.max(region.available_worker_count, 1) * 50).toFixed(1)) };
-  }));
+    const normalized = { ...region, latitude: Number(region.latitude), longitude: Number(region.longitude), supply_demand_ratio: ratio, state, opportunity_score: Number(Math.min(100, region.active_demand / Math.max(region.available_worker_count, 1) * 50).toFixed(1)) };
+    delete normalized.records;
+    delete normalized.coordinateSource;
+    return normalized;
+  });
 }
 
 async function resolveCanonicalRegionCoordinates(regionName, records) {
-  const coordinates = records.map((record) => [Number(record.latitude), Number(record.longitude)]);
-  const hasConflictingCoordinates = coordinates.some(([latitude, longitude]) => Math.abs(latitude - coordinates[0][0]) > 0.02 || Math.abs(longitude - coordinates[0][1]) > 0.02);
-  if (!hasConflictingCoordinates) return coordinates[0];
-  try {
-    const query = `${regionName}, West Bengal`;
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&q=${encodeURIComponent(query)}`, { headers: { Accept: 'application/json' } });
-    const results = await response.json();
-    const regionWord = String(regionName).split(',')[0].trim().toLowerCase();
-    const match = results.find((item) => item.type !== 'aeroway' && String(item.display_name || '').toLowerCase().includes(regionWord));
-    if (match && Number.isFinite(Number(match.lat)) && Number.isFinite(Number(match.lon))) return [Number(match.lat), Number(match.lon)];
-  } catch {
-    // Keep the real backend coordinate when canonical geocoding is unavailable.
-  }
-  return coordinates[0];
+  const valid = records.filter((record) => Number.isFinite(Number(record.latitude)) && Number.isFinite(Number(record.longitude)));
+  if (!valid.length) return [null, null];
+
+  const chosen = valid.reduce((best, record) => {
+    const score = (Number(record.active_demand) || 0) * 5 + (Number(record.worker_count) || 0) * 2 + (Number(record.relevant_job_count) || 0);
+    return score > best.score ? { score, record } : best;
+  }, { score: -Infinity, record: valid[0] });
+
+  return [Number(chosen.record.latitude), Number(chosen.record.longitude)];
 }
 
 function initializeAdminMap(regions, searchedCoordinates = null, viewport = null) {
@@ -1124,8 +1151,29 @@ function initializeAdminMap(regions, searchedCoordinates = null, viewport = null
     attribution: '&copy; OpenStreetMap contributors',
   }).addTo(state.adminMap);
 
+  const fallbackLayers = [];
+  if (!regions.length && searchedCoordinates) {
+    const centerLat = Number(searchedCoordinates[0]);
+    const centerLng = Number(searchedCoordinates[1]);
+    for (let index = 0; index < 5; index += 1) {
+      const angle = (index / 5) * Math.PI * 2;
+      const latitude = centerLat + Math.cos(angle) * 0.025;
+      const longitude = centerLng + Math.sin(angle) * 0.03;
+      const layer = window.L.circleMarker([latitude, longitude], {
+        radius: 8,
+        color: '#d7d7d7',
+        fillColor: '#f0f0f0',
+        fillOpacity: 0.8,
+        weight: 1,
+      })
+        .bindPopup('<strong>No active jobs</strong><br>Sample coverage area')
+        .bindTooltip('No active jobs', { direction: 'top', sticky: true })
+        .addTo(state.adminMap);
+      fallbackLayers.push(layer);
+    }
+  }
+
   const layers = regions.map((region) => {
-    const ratio = region.supply_demand_ratio ?? (region.active_demand ? region.active_demand / Math.max(region.available_worker_count, 1) : 0);
     const color = region.state === 'OVERSUPPLIED' ? '#d59b27' : region.state === 'BALANCED' ? '#315c4c' : '#d9684f';
     const layer = window.L.circle([region.latitude, region.longitude], { radius: 0, color, fillColor: color, fillOpacity: 0.2, weight: 2 })
       .bindPopup(`<strong>${escapeHtml(region.region)}</strong><br>Workers: ${region.worker_count}<br>Available: ${region.available_worker_count}<br>Demand: ${region.active_demand}<br>Status: ${statusLabel(region.state)}`)
@@ -1133,7 +1181,7 @@ function initializeAdminMap(regions, searchedCoordinates = null, viewport = null
       .addTo(state.adminMap);
     return layer;
   });
-  state.adminMapLayers = layers;
+  state.adminMapLayers = [...layers, ...fallbackLayers];
   const saveViewport = () => {
     const saved = readAdminHeatmapState();
     if (!saved) return;
@@ -1153,6 +1201,7 @@ function initializeAdminMap(regions, searchedCoordinates = null, viewport = null
   if (viewport?.center && Number.isFinite(viewport.zoom)) state.adminMap.setView(viewport.center, viewport.zoom);
   else if (state.adminMapBounds?.isValid()) resetAdminMapView();
   else if (searchedCoordinates) state.adminMap.setView(searchedCoordinates, 7);
+  else if (fallbackLayers.length) state.adminMap.setView([fallbackLayers[0]._latlng.lat, fallbackLayers[0]._latlng.lng], 7);
 }
 
 function resetAdminMapView() {

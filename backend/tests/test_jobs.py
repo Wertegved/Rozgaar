@@ -19,6 +19,7 @@ from app.db.models.skills import Skill
 from app.db.models.users import ConsumerProfile, User, WorkerProfile, WorkerSkill
 from app.db.session import get_db
 from app.main import app
+from app.services.location_intelligence_service import region_intelligence
 
 
 @pytest.fixture()
@@ -206,6 +207,61 @@ def test_worker_discovery_respects_saved_working_region(job_context: dict[str, o
     titles = {item["title"] for item in response.json()["items"]}
     assert "Local painting job" in titles
     assert "Mumbai painting job" not in titles
+
+
+def test_location_intelligence_collapses_duplicate_region_labels_into_one_canonical_record(job_context: dict[str, object]) -> None:
+    session = job_context["session_factory"]()
+    worker_a = User(
+        name="Worker A", phone="9100000004", email="worker-a@example.com",
+        password_hash=hash_password("password123"), role=UserRole.WORKER,
+        account_status=AccountStatus.ACTIVE,
+    )
+    worker_b = User(
+        name="Worker B", phone="9100000005", email="worker-b@example.com",
+        password_hash=hash_password("password123"), role=UserRole.WORKER,
+        account_status=AccountStatus.ACTIVE,
+    )
+    session.add_all([worker_a, worker_b])
+    session.flush()
+    session.add_all([
+        WorkerProfile(user_id=worker_a.id, working_location="Salt Lake, Kolkata", working_latitude=22.66, working_longitude=88.45),
+        WorkerProfile(user_id=worker_b.id, working_location="Salt Lake, Kolkata", working_latitude=22.59, working_longitude=88.42),
+    ])
+    session.commit()
+
+    regions = region_intelligence(session)
+    salt_lake = [region for region in regions if region.region == "Salt Lake, Kolkata"]
+    assert len(salt_lake) == 1
+    assert len({(region.latitude, region.longitude) for region in salt_lake}) == 1
+    session.close()
+
+
+def test_location_intelligence_normalizes_equivalent_region_names(job_context: dict[str, object]) -> None:
+    session = job_context["session_factory"]()
+    worker_a = User(
+        name="Worker A", phone="9100000006", email="worker-a-alt@example.com",
+        password_hash=hash_password("password123"), role=UserRole.WORKER,
+        account_status=AccountStatus.ACTIVE,
+    )
+    worker_b = User(
+        name="Worker B", phone="9100000007", email="worker-b-alt@example.com",
+        password_hash=hash_password("password123"), role=UserRole.WORKER,
+        account_status=AccountStatus.ACTIVE,
+    )
+    session.add_all([worker_a, worker_b])
+    session.flush()
+    session.add_all([
+        WorkerProfile(user_id=worker_a.id, working_location="Salt Lake - Kolkata", working_latitude=22.66, working_longitude=88.45),
+        WorkerProfile(user_id=worker_b.id, working_location="Salt Lake, Kolkata", working_latitude=22.59, working_longitude=88.42),
+    ])
+    session.commit()
+
+    regions = region_intelligence(session)
+    salt_lake = [region for region in regions if "salt lake" in region.region.lower() and "kolkata" in region.region.lower()]
+    assert len(salt_lake) == 1
+    assert salt_lake[0].latitude == 22.66
+    assert salt_lake[0].longitude == 88.45
+    session.close()
 
 
 def test_consumer_location_intelligence_includes_matching_workers(job_context: dict[str, object]) -> None:
