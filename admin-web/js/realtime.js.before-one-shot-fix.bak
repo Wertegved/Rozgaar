@@ -6,8 +6,6 @@
   let stopped = true;
   let options;
   let supabaseModule;
-  let connectPromise;
-  let sessionKey = null;
 
   const loadClient = () => new Promise((resolve, reject) => {
     if (supabaseModule) return resolve(supabaseModule);
@@ -33,8 +31,6 @@
   const stop = async () => {
     clearTimeout(reconnectTimer);
     clearTimeout(refreshTimer);
-    sessionKey = null;
-    connectPromise = null;
     await resetClient();
   };
 
@@ -59,32 +55,19 @@
       const topic = config.channel;
       channel = client.channel(topic, { config: { private: true } })
         .on('broadcast', { event: 'rozgaar.event' }, event => options.onEvent?.(event.payload))
-        .subscribe((status, error) => {
-          options.onStatus?.(status, error);
+        .subscribe((status) => {
+          options.onStatus?.(status);
           if (status === 'SUBSCRIBED') refreshTimer = setTimeout(connect, 12 * 60 * 1000);
           if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) reconnectTimer = setTimeout(connect, 3000);
         });
     } catch (error) {
-      options.onStatus?.('ERROR', error);
+      options.onStatus?.('ERROR');
       reconnectTimer = setTimeout(connect, 3000);
     }
   };
 
   window.RozgaarRealtime = {
-    start(next) {
-      const nextSessionKey = next?.user?.id && next?.token ? `${next.user.id}|${next.token}` : null;
-      options = next;
-      if (stopped || sessionKey !== nextSessionKey) {
-        stopped = false;
-        sessionKey = nextSessionKey;
-        connectPromise = connect();
-        connectPromise.finally(() => {
-          if (sessionKey === nextSessionKey) connectPromise = null;
-        });
-        return connectPromise;
-      }
-      return connectPromise || Promise.resolve();
-    },
-    stop() { stopped = true; options = null; sessionKey = null; return stop(); },
+    start(next) { stopped = false; options = next; return connect(); },
+    stop() { stopped = true; options = null; return stop(); },
   };
 })();
