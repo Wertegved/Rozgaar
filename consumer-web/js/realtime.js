@@ -16,28 +16,57 @@
     script.onerror = reject;
     document.head.appendChild(script);
   });
-  const removeChannel = async () => { if (client && channel) await client.removeChannel(channel); channel = null; };
-  const stop = async () => { clearTimeout(reconnectTimer); clearTimeout(refreshTimer); await removeChannel(); client = null; };
+
+  const resetClient = async () => {
+    const currentClient = client;
+    const currentChannel = channel;
+    client = null;
+    channel = null;
+
+    if (currentClient && currentChannel) {
+      try { await currentClient.removeChannel(currentChannel); } catch (error) {}
+    }
+  };
+
+  const stop = async () => {
+    clearTimeout(reconnectTimer);
+    clearTimeout(refreshTimer);
+    await resetClient();
+  };
+
   const connect = async () => {
     if (stopped || !options?.token || !options?.user?.id) return;
     clearTimeout(reconnectTimer);
     clearTimeout(refreshTimer);
-    await removeChannel();
+    await resetClient();
+
     try {
       const response = await fetch(`${options.apiBase}/realtime/token`, { headers: { Authorization: `Bearer ${options.token}` } });
       const config = await response.json();
       if (!response.ok) throw new Error(config.detail || 'Realtime authorization failed.');
+
       const supabase = await loadClient();
-      if (!client) client = supabase.createClient(config.supabase_url, config.supabase_anon_key, {
+      const accessToken = config.access_token;
+      client = supabase.createClient(config.supabase_url, config.supabase_anon_key, {
         auth: { persistSession: false, autoRefreshToken: false },
-        accessToken: async () => config.access_token,
+        accessToken: async () => accessToken,
       });
-      channel = client.channel(config.channel, { config: { private: true } }).on('broadcast', { event: 'rozgaar.event' }, event => options.onEvent?.(event.payload)).subscribe(status => {
-        options.onStatus?.(status);
-        if (status === 'SUBSCRIBED') refreshTimer = setTimeout(connect, 12 * 60 * 1000);
-        if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) reconnectTimer = setTimeout(connect, 3000);
-      });
-    } catch (error) { options.onStatus?.('ERROR'); reconnectTimer = setTimeout(connect, 3000); }
+
+      channel = client.channel(config.channel, { config: { private: true } })
+        .on('broadcast', { event: 'rozgaar.event' }, event => options.onEvent?.(event.payload))
+        .subscribe((status) => {
+          options.onStatus?.(status);
+          if (status === 'SUBSCRIBED') refreshTimer = setTimeout(connect, 12 * 60 * 1000);
+          if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) reconnectTimer = setTimeout(connect, 3000);
+        });
+    } catch (error) {
+      options.onStatus?.('ERROR');
+      reconnectTimer = setTimeout(connect, 3000);
+    }
   };
-  window.RozgaarRealtime = { start(next) { stopped = false; options = next; return connect(); }, stop() { stopped = true; options = null; return stop(); } };
+
+  window.RozgaarRealtime = {
+    start(next) { stopped = false; options = next; return connect(); },
+    stop() { stopped = true; options = null; return stop(); },
+  };
 })();

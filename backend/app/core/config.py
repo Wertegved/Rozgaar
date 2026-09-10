@@ -19,16 +19,16 @@ class Settings(BaseSettings):
         ),
         validation_alias="CORS_ORIGINS",
     )
-    database_url: str | None = None
-    supabase_url: str | None = None
-    supabase_anon_key: str | None = None
-    supabase_service_role_key: str | None = None
+    database_url: str | None = Field(default=None, validation_alias="DATABASE_URL")
+    supabase_url: str | None = Field(default=None, validation_alias="SUPABASE_URL")
+    supabase_anon_key: str | None = Field(default=None, validation_alias="SUPABASE_ANON_KEY")
+    supabase_service_role_key: str | None = Field(default=None, validation_alias="SUPABASE_SERVICE_ROLE_KEY")
     supabase_jwt_secret: str = Field(default="", validation_alias="SUPABASE_JWT_SECRET")
-    supabase_db_url: str | None = None
-    supabase_db_direct_url: str | None = None
-    jwt_secret_key: str = ""
-    jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
+    supabase_db_url: str | None = Field(default=None, validation_alias="SUPABASE_DB_URL")
+    supabase_db_direct_url: str | None = Field(default=None, validation_alias="SUPABASE_DB_DIRECT_URL")
+    jwt_secret_key: str = Field(default="", validation_alias="JWT_SECRET_KEY")
+    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    jwt_access_token_expire_minutes: int = Field(default=30, validation_alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES")
     payment_provider: str = "simulated"
     payment_advance_percentage: int = Field(default=20, ge=0, le=100)
     smtp_host: str = ""
