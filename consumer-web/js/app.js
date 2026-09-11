@@ -1,4 +1,4 @@
-const API_BASE = localStorage.getItem('rozgaar_api_base') || 'http://127.0.0.1:8000/api/v1';
+const API_BASE = localStorage.getItem('rozgaar_api_base') || 'https://rozgaar-backend-v34k.onrender.com/api/v1';
 const state = { token: localStorage.getItem('rozgaar_token'), user: null, jobs: [], notifications: [], payments: [], selectedJob: null, applicants: [], eventsBound: false };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
