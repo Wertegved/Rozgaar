@@ -3,6 +3,7 @@ from sqlalchemy import CheckConstraint, UniqueConstraint
 from app.core.config import Settings
 from app.db.base import Base
 from app.db.models import Application, Job, Review, WorkerSkill
+from app.db.session import create_database_engine, get_db
 
 
 def test_database_configuration_does_not_require_secrets() -> None:
@@ -56,3 +57,28 @@ def test_relationship_foreign_keys_are_present() -> None:
     assert job_consumer_fk.column.table.name == "consumer_profiles"
     assert Application.__table__.c.job_id.foreign_keys
     assert Application.__table__.c.worker_id.foreign_keys
+
+
+def test_sqlalchemy_engine_uses_conservative_session_pool_config() -> None:
+    engine = create_database_engine("postgresql://user:pass@db.example.com:5432/postgres")
+
+    assert engine is not None
+    assert engine.pool.size() == 3
+    assert engine.pool._max_overflow == 2
+    assert engine.pool.timeout == 30
+    assert engine.pool._pre_ping is True
+    assert engine.pool._recycle == 1800
+
+
+def test_get_db_closes_sessions_after_request() -> None:
+    session_generator = get_db()
+    session = next(session_generator)
+
+    assert session is not None
+    assert session.bind is not None
+
+    try:
+        next(session_generator)
+    except StopIteration:
+        pass
+    session_generator.close()

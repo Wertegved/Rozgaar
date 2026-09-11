@@ -6,11 +6,18 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import get_settings
 
 
-def create_database_engine():
-    database_url = get_settings().sqlalchemy_database_url
-    if not database_url:
+def create_database_engine(database_url: str | None = None):
+    resolved_url = database_url or get_settings().sqlalchemy_database_url
+    if not resolved_url:
         return None
-    return create_engine(database_url, pool_pre_ping=True)
+    return create_engine(
+        resolved_url,
+        pool_size=3,
+        max_overflow=2,
+        pool_timeout=30,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+    )
 
 
 engine = create_database_engine()
@@ -23,5 +30,8 @@ def get_db() -> Generator[Session, None, None]:
     session = SessionLocal()
     try:
         yield session
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()
