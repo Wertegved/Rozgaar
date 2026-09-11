@@ -118,7 +118,7 @@ def _evaluate(session: Session, job: Job, completion: Completion, provider: Paym
     if not (all_workers_confirmed and worker_evidence_count >= len(active_agreements) and completion.consumer_confirmed_at and consumer_evidence):
         return
     agreement = active_agreements[0]
-    payment = release_final_payment(session, agreement.id, provider, commit=False)
+    payment = release_final_payment(session, agreement.id, provider, commit=False, payment_details=getattr(completion, "payment_details", None))
     if payment.status is PaymentStatus.COMPLETED:
         job.status = JobStatus.COMPLETED
 
