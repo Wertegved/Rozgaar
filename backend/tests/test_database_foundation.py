@@ -1,4 +1,5 @@
 from sqlalchemy import CheckConstraint, UniqueConstraint
+from sqlalchemy.pool import NullPool
 
 from app.core.config import Settings
 from app.db.base import Base
@@ -59,15 +60,12 @@ def test_relationship_foreign_keys_are_present() -> None:
     assert Application.__table__.c.worker_id.foreign_keys
 
 
-def test_sqlalchemy_engine_uses_conservative_session_pool_config() -> None:
+def test_sqlalchemy_engine_uses_null_pool_for_production_session_pooler() -> None:
     engine = create_database_engine("postgresql://user:pass@db.example.com:5432/postgres")
 
     assert engine is not None
-    assert engine.pool.size() == 3
-    assert engine.pool._max_overflow == 2
-    assert engine.pool.timeout == 30
+    assert isinstance(engine.pool, NullPool)
     assert engine.pool._pre_ping is True
-    assert engine.pool._recycle == 1800
 
 
 def test_get_db_closes_sessions_after_request() -> None:
