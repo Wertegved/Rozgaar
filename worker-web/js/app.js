@@ -1,6 +1,6 @@
 function startWorkerRealtime() { window.RozgaarRealtime?.start({ apiBase: API_BASE, token: state.token, user: state.user, onEvent: () => loadCore(), onStatus: status => document.body.dataset.realtimeStatus = status }); }
 
-const API_BASE = localStorage.getItem('rozgaar_api_base') || 'http://127.0.0.1:8000/api/v1';
+const API_BASE = localStorage.getItem('rozgaar_api_base') || 'https://rozgaar-backend-v34k.onrender.com/api/v1';
 const state = { token: localStorage.getItem('rozgaar_worker_token') || localStorage.getItem('rozgaar_token'), user: null, jobs: [], applications: [], schedule: [], availability: [], payments: [], notifications: [], reviews: [], complaints: [], view: 'home', eventsBound: false };
 let workerMap = null;
 let workerMapLayers = [];
