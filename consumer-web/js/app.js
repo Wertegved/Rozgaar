@@ -1,7 +1,7 @@
 async function refreshConsumerRealtimeState() { await loadWorkspace(); const locationInput = $('#job-location'); const panel = $('#location-intelligence'); if (!locationInput || !panel || !locationInput.value.trim()) return; const category = $('.choice.selected[data-choice="category"]')?.dataset.value || 'GENERAL'; try { const data = await api(`/location-intelligence/consumer?location=${encodeURIComponent(locationInput.value.trim())}&category=${encodeURIComponent(category)}`); panel.innerHTML = data.nearby_worker_count ? `<strong>${data.available_worker_count} available nearby</strong><span>Supply ${esc(data.supply_level.toLowerCase())} · Demand ${esc(data.demand_level.toLowerCase())}</span>` : '<strong>No matching workers nearby right now.</strong><span>You can still post this job. Eligible Workers may become available later.</span>'; } catch (error) { panel.textContent = error.message; } }
 function startConsumerRealtime() { window.RozgaarRealtime?.start({ apiBase: API_BASE, token: state.token, user: state.user, onEvent: () => refreshConsumerRealtimeState(), onStatus: status => document.body.dataset.realtimeStatus = status }); }
 
-const API_BASE = localStorage.getItem('rozgaar_api_base') || 'http://127.0.0.1:8000/api/v1';
+const API_BASE = localStorage.getItem('rozgaar_api_base') || 'https://rozgaar-backend-v34k.onrender.com/api/v1';
 const state = { token: localStorage.getItem('rozgaar_token'), user: null, jobs: [], notifications: [], payments: [], selectedJob: null, applicants: [], eventsBound: false };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
