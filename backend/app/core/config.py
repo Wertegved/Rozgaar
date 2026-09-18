@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     cors_origins: str = Field(default="", validation_alias="CORS_ORIGINS")
+    consumer_web_url: str = "http://localhost:5500"
+    password_reset_token_expire_minutes: int = 30
     database_url: str | None = None
     supabase_url: str | None = None
     supabase_anon_key: str | None = None

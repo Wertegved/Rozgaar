@@ -12,6 +12,7 @@ from app.db.models.users import ConsumerProfile, User, WorkerProfile, WorkerSkil
 from app.db.models.cancellations import Cancellation
 from app.db.models.skills import Skill
 from app.db.models.notifications import Notification
+from app.db.models.password_reset_tokens import PasswordResetToken
 
 __all__ = [
     "Agreement",
@@ -29,6 +30,7 @@ __all__ = [
     "JobImage",
     "JobRequirement",
     "Negotiation",
+    "PasswordResetToken",
     "Payment",
     "Review",
     "Skill",

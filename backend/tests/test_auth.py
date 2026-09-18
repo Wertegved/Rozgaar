@@ -1,4 +1,6 @@
+import hashlib
 from collections.abc import Generator
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -11,9 +13,14 @@ from app.auth.dependencies import require_admin, require_consumer, require_worke
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.models.enums import AccountStatus, UserRole
+from app.db.models.password_reset_tokens import PasswordResetToken
 from app.db.models.users import User
 from app.db.session import get_db
 from app.main import app
+from app.providers.email import FakeEmailProvider
+from app.schemas.auth import MessageResponse
+from app.services.email_service import EmailService
+from app.api.auth import get_email_service
 
 
 @pytest.fixture()
@@ -151,6 +158,95 @@ def test_invalid_credentials_and_inactive_account_are_rejected(client: TestClien
         json={"email": "person@example.com", "password": "correct horse battery"},
     )
     assert inactive.status_code == 401
+
+
+def test_password_reset_request_creates_token_for_known_email_and_ignores_unknown_email(client: TestClient) -> None:
+    register(client)
+    email_service = EmailService(provider=FakeEmailProvider())
+    app.dependency_overrides[get_email_service] = lambda: email_service
+
+    known = client.post("/api/v1/auth/forgot-password", json={"email": "person@example.com"})
+    assert known.status_code == 200
+    assert known.json()["message"] == "If an account exists for that email, a reset link is on its way."
+    assert len(email_service.provider.sent) == 1
+    assert "http://localhost:5500/#reset-password=" in email_service.provider.sent[0].body
+
+    with client.auth_session_factory() as session:
+        assert session.scalar(select(PasswordResetToken)) is not None
+
+    unknown = client.post("/api/v1/auth/forgot-password", json={"email": "missing@example.com"})
+    assert unknown.status_code == 200
+    assert unknown.json() == {"message": "If an account exists for that email, a reset link is on its way."}
+    assert len(email_service.provider.sent) == 1
+
+    app.dependency_overrides.clear()
+
+
+def test_valid_password_reset_changes_password_and_rejects_reuse(client: TestClient) -> None:
+    register(client)
+    email_service = EmailService(provider=FakeEmailProvider())
+    app.dependency_overrides[get_email_service] = lambda: email_service
+
+    client.post("/api/v1/auth/forgot-password", json={"email": "person@example.com"})
+    token = email_service.provider.sent[0].body.split("reset-password=")[-1].strip()
+
+    reset = client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": token, "new_password": "newpass123"},
+    )
+    assert reset.status_code == 200
+    assert reset.json()["message"] == "Your password has been reset successfully."
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "person@example.com", "password": "newpass123"},
+    )
+    old_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "person@example.com", "password": "correct horse battery"},
+    )
+    assert login.status_code == 200
+    assert old_login.status_code == 401
+
+    reuse = client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": token, "new_password": "anotherpass123"},
+    )
+    assert reuse.status_code == 400
+    assert reuse.json()["error"]["detail"] == "This reset link is invalid or has expired"
+
+    app.dependency_overrides.clear()
+
+
+def test_expired_reset_token_is_rejected_and_short_passwords_are_invalid(client: TestClient) -> None:
+    register(client)
+    user = None
+    with client.auth_session_factory() as session:
+        user = session.scalar(select(User).where(User.email == "person@example.com"))
+        assert user is not None
+        raw = "expired-reset-token-123"
+        session.add(
+            PasswordResetToken(
+                user_id=user.id,
+                token_hash=hashlib.sha256(raw.encode()).hexdigest(),
+                expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            )
+        )
+        session.commit()
+
+    expired = client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": raw, "new_password": "newpass123"},
+    )
+    assert expired.status_code == 400
+    assert expired.json()["error"]["detail"] == "This reset link is invalid or has expired"
+
+    short = client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": "something-else",
+              "new_password": "short"},
+    )
+    assert short.status_code == 422
 
 
 def test_role_dependencies_enforce_backend_roles() -> None:
