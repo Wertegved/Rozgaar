@@ -225,6 +225,20 @@ h2 { font: 400 38px/.98 var(--font-display); letter-spacing: -.04em; margin-bott
 .toast.show { transform: translateY(0); opacity: 1; }
 
 .auth-state { display: flex; gap: 10px; align-items: center; }
+.nav-toggle { display: none; flex-direction: column; justify-content: center; gap: 5px; width: 40px; height: 40px; padding: 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); flex-shrink: 0; }
+.nav-toggle-bar { display: block; width: 100%; height: 2px; background: var(--ink); border-radius: 2px; transition: transform .2s ease, opacity .2s ease; }
+.nav-toggle.is-active .nav-toggle-bar:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.nav-toggle.is-active .nav-toggle-bar:nth-child(2) { opacity: 0; }
+.nav-toggle.is-active .nav-toggle-bar:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+.mobile-nav-backdrop { position: fixed; inset: 0; background: rgba(23,35,31,.35); opacity: 0; pointer-events: none; transition: opacity .2s ease; z-index: 40; }
+.mobile-nav-backdrop.is-open { opacity: 1; pointer-events: auto; }
+
+.mobile-nav { position: fixed; top: 0; right: 0; height: 100vh; width: min(78vw, 320px); background: var(--surface); box-shadow: -20px 0 50px rgba(28,50,41,.18); z-index: 41; display: flex; flex-direction: column; gap: 2px; padding: 88px 28px 28px; transform: translateX(100%); transition: transform .25s ease; }
+.mobile-nav.is-open { transform: translateX(0); }
+.mobile-nav a { padding: 14px 2px; font-size: 17px; font-weight: 700; color: var(--ink); border-bottom: 1px solid var(--line); }
+body.nav-open { overflow: hidden; }
+
 .auth-card { max-width: 400px; margin: 40px auto; padding: 28px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); }
 .auth-card h2 { margin-bottom: 6px; }
 .auth-card p { color: var(--muted); }
@@ -237,6 +251,7 @@ h2 { font: 400 38px/.98 var(--font-display); letter-spacing: -.04em; margin-bott
 
 @media (max-width: 850px) {
   .topnav { display: none; }
+  .nav-toggle { display: flex; }
   .hero { grid-template-columns: 1fr; padding-top: 28px; }
   .hero-art { min-height: 290px; max-width: 540px; width: 100%; margin: 0 auto; }
   .dashboard-grid { grid-template-columns: 1fr; }
