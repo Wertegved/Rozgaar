@@ -2,7 +2,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -67,22 +67,14 @@ def request_password_reset(session: Session, email: str) -> tuple[User, str] | N
         return None
 
     now = datetime.now(timezone.utc)
-    reset_count = session.scalar(
-        select(PasswordResetToken.id).where(
+    recent = session.scalar(
+        select(func.count()).select_from(PasswordResetToken).where(
             PasswordResetToken.user_id == user.id,
             PasswordResetToken.created_at >= now - timedelta(hours=1),
-            PasswordResetToken.used_at.is_(None),
         )
     )
-    if reset_count is not None:
-        count = session.execute(
-            select(PasswordResetToken).where(
-                PasswordResetToken.user_id == user.id,
-                PasswordResetToken.created_at >= now - timedelta(hours=1),
-            )
-        ).scalars().all()
-        if len(count) >= 3:
-            return None
+    if recent >= 3:
+        return None
 
     raw = secrets.token_urlsafe(32)
     session.add(

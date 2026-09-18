@@ -16,7 +16,7 @@ from app.schemas.auth import (
     UserResponse,
 )
 from app.services.auth_service import login_user, request_password_reset, register_user, reset_password
-from app.services.email_service import EmailService
+from app.services.email_service import EmailService, FakeEmailProvider
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ def forgot_password(
 
     user, raw_token = result
     reset_link = f"{get_settings().consumer_web_url}/#reset-password={raw_token}"
-    if get_settings().environment == "development" and email_service.provider.__class__.__name__ == "FakeEmailProvider":
+    if get_settings().environment == "development" and isinstance(email_service.provider, FakeEmailProvider):
         logger.warning("Password reset link for %s: %s", user.email, reset_link)
 
     background_tasks.add_task(
