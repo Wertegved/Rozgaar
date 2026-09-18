@@ -20,6 +20,17 @@ def is_redis_available() -> bool:
         return False
 
 
+def consume_rate_limit(key: str, limit: int, window_seconds: int) -> bool:
+    try:
+        client = get_redis_client()
+        count = client.incr(key)
+        if count == 1:
+            client.expire(key, window_seconds)
+        return count <= limit
+    except (RedisError, OSError):
+        return True
+
+
 def close_redis_client() -> None:
     """Release the shared client, primarily for controlled shutdown and tests."""
     client = get_redis_client()

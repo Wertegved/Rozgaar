@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -50,6 +50,13 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def validate_consumer_web_url(self) -> "Settings":
+        self.consumer_web_url = self.consumer_web_url.rstrip("/")
+        if self.environment.lower() != "development" and not self.consumer_web_url.startswith("https://"):
+            raise ValueError("CONSUMER_WEB_URL must use https:// outside development")
+        return self
 
     @field_validator("smtp_port", mode="before")
     @classmethod

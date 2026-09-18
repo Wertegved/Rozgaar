@@ -2,7 +2,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -62,11 +62,12 @@ def login_user(session: Session, data: LoginRequest) -> tuple[str, User]:
 
 
 def request_password_reset(session: Session, email: str) -> tuple[User, str] | None:
+    now = datetime.now(timezone.utc)
+    session.execute(delete(PasswordResetToken).where(PasswordResetToken.expires_at < now - timedelta(days=1)))
     user = session.scalar(select(User).where(User.email == email))
-    if user is None or user.account_status is not AccountStatus.ACTIVE:
+    if user is None or user.account_status is not AccountStatus.ACTIVE or user.role is not UserRole.CONSUMER:
         return None
 
-    now = datetime.now(timezone.utc)
     recent = session.scalar(
         select(func.count()).select_from(PasswordResetToken).where(
             PasswordResetToken.user_id == user.id,
@@ -75,6 +76,12 @@ def request_password_reset(session: Session, email: str) -> tuple[User, str] | N
     )
     if recent >= 3:
         return None
+
+    session.execute(
+        update(PasswordResetToken)
+        .where(PasswordResetToken.user_id == user.id, PasswordResetToken.used_at.is_(None))
+        .values(used_at=now)
+    )
 
     raw = secrets.token_urlsafe(32)
     session.add(
@@ -88,27 +95,33 @@ def request_password_reset(session: Session, email: str) -> tuple[User, str] | N
     return user, raw
 
 
-def reset_password(session: Session, token: str, new_password: str) -> None:
+def reset_password(session: Session, token: str, new_password: str) -> User:
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     now = datetime.now(timezone.utc)
-    record = session.scalar(
-        select(PasswordResetToken).where(
+    user_id = session.execute(
+        update(PasswordResetToken)
+        .where(
             PasswordResetToken.token_hash == token_hash,
             PasswordResetToken.used_at.is_(None),
             PasswordResetToken.expires_at > now,
         )
-    )
-    if record is None:
+        .values(used_at=now)
+        .returning(PasswordResetToken.user_id)
+    ).scalar_one_or_none()
+    if user_id is None:
         raise APIError(400, "This reset link is invalid or has expired")
 
-    user = session.get(User, record.user_id)
+    user = session.get(User, user_id)
     if user is None or user.account_status is not AccountStatus.ACTIVE:
+        session.rollback()
         raise APIError(400, "This reset link is invalid or has expired")
 
     user.password_hash = hash_password(new_password)
+    user.password_changed_at = now
     session.execute(
         update(PasswordResetToken)
         .where(PasswordResetToken.user_id == user.id, PasswordResetToken.used_at.is_(None))
         .values(used_at=now)
     )
     session.commit()
+    return user

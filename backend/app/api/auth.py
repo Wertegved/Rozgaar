@@ -1,11 +1,13 @@
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, oauth2_scheme
 from app.core.config import get_settings
 from app.db.session import get_db
+from app.db.session import SessionLocal, engine
+from app.infrastructure.redis import consume_rate_limit
 from app.providers.email import FakeEmailProvider
 from app.schemas.auth import (
     AuthResponse,
@@ -26,6 +28,23 @@ def get_email_service() -> EmailService:
     return EmailService()
 
 
+def _send_password_reset_email(email: str) -> None:
+    session = SessionLocal()
+    try:
+        result = request_password_reset(session, email)
+        if result is None:
+            return
+        user, raw_token = result
+        reset_link = f"{get_settings().consumer_web_url.rstrip('/')}/#reset-password={raw_token}"
+        EmailService().send(
+            str(user.email),
+            "Reset your Rozgaar password",
+            f"Use the link below to reset your password. This link expires in {get_settings().password_reset_token_expire_minutes} minutes.\n\n{reset_link}\n\nIf you did not request this, you can ignore this email.",
+        )
+    finally:
+        session.close()
+
+
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
@@ -43,16 +62,25 @@ def login(data: LoginRequest, session: Session = Depends(get_db)) -> AuthRespons
 @router.post("/forgot-password", response_model=MessageResponse)
 def forgot_password(
     data: ForgotPasswordRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_db),
     email_service: EmailService = Depends(get_email_service),
 ) -> MessageResponse:
+    client_ip = request.client.host if request.client else "unknown"
+    if not consume_rate_limit(f"password-reset:ip:{client_ip}", limit=10, window_seconds=3600):
+        return MessageResponse(message="If an account exists for that email, a reset link is on its way.")
+
+    if engine is not None:
+        background_tasks.add_task(_send_password_reset_email, str(data.email))
+        return MessageResponse(message="If an account exists for that email, a reset link is on its way.")
+
     result = request_password_reset(session, str(data.email))
     if result is None:
         return MessageResponse(message="If an account exists for that email, a reset link is on its way.")
 
     user, raw_token = result
-    reset_link = f"{get_settings().consumer_web_url}/#reset-password={raw_token}"
+    reset_link = f"{get_settings().consumer_web_url.rstrip('/')}/#reset-password={raw_token}"
     if get_settings().environment == "development" and isinstance(email_service.provider, FakeEmailProvider):
         logger.warning("Password reset link for %s: %s", user.email, reset_link)
 
@@ -60,7 +88,7 @@ def forgot_password(
         email_service.send,
         str(user.email),
         "Reset your Rozgaar password",
-        f"Use the link below to reset your password. This link expires in {get_settings().password_reset_token_expire_minutes} minutes.\n\n{reset_link}",
+        f"Use the link below to reset your password. This link expires in {get_settings().password_reset_token_expire_minutes} minutes.\n\n{reset_link}\n\nIf you did not request this, you can ignore this email.",
     )
     return MessageResponse(message="If an account exists for that email, a reset link is on its way.")
 
@@ -68,9 +96,17 @@ def forgot_password(
 @router.post("/reset-password", response_model=MessageResponse)
 def reset_password_route(
     data: ResetPasswordRequest,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db),
+    email_service: EmailService = Depends(get_email_service),
 ) -> MessageResponse:
-    reset_password(session, data.token, data.new_password)
+    user = reset_password(session, data.token, data.new_password)
+    background_tasks.add_task(
+        email_service.send,
+        str(user.email),
+        "Your Rozgaar password was changed",
+        "Your Rozgaar password was changed successfully. If you did not make this change, contact support immediately.",
+    )
     return MessageResponse(message="Your password has been reset successfully.")
 
 

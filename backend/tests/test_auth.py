@@ -1,4 +1,5 @@
 import hashlib
+import time
 from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth.dependencies import require_admin, require_consumer, require_worker
+from app.auth.jwt import decode_access_token
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.models.enums import AccountStatus, UserRole
@@ -188,7 +190,13 @@ def test_valid_password_reset_changes_password_and_rejects_reuse(client: TestCli
     app.dependency_overrides[get_email_service] = lambda: email_service
 
     client.post("/api/v1/auth/forgot-password", json={"email": "person@example.com"})
-    token = email_service.provider.sent[0].body.split("reset-password=")[-1].strip()
+    token = email_service.provider.sent[0].body.split("reset-password=")[-1].splitlines()[0]
+    old_session = client.post(
+        "/api/v1/auth/login",
+        json={"email": "person@example.com", "password": "correct horse battery"},
+    )
+    old_access_token = old_session.json()["access_token"]
+    time.sleep(1.05)
 
     reset = client.post(
         "/api/v1/auth/reset-password",
@@ -207,6 +215,16 @@ def test_valid_password_reset_changes_password_and_rejects_reuse(client: TestCli
     )
     assert login.status_code == 200
     assert old_login.status_code == 401
+    with client.auth_session_factory() as session:
+        changed_user = session.scalar(select(User).where(User.email == "person@example.com"))
+        assert changed_user is not None
+        assert changed_user.password_changed_at is not None
+        changed_at = changed_user.password_changed_at
+        if changed_at.tzinfo is None:
+            changed_at = changed_at.replace(tzinfo=timezone.utc)
+        assert int(decode_access_token(old_access_token)["iat"]) <= int(changed_at.timestamp())
+    assert client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {old_access_token}"}).status_code == 401
+    assert len(email_service.provider.sent) == 2
 
     reuse = client.post(
         "/api/v1/auth/reset-password",
@@ -215,6 +233,46 @@ def test_valid_password_reset_changes_password_and_rejects_reuse(client: TestCli
     assert reuse.status_code == 400
     assert reuse.json()["error"]["detail"] == "This reset link is invalid or has expired"
 
+    app.dependency_overrides.clear()
+
+
+def test_new_reset_request_invalidates_previous_link_and_caps_requests(client: TestClient) -> None:
+    register(client)
+    email_service = EmailService(provider=FakeEmailProvider())
+    app.dependency_overrides[get_email_service] = lambda: email_service
+
+    for _ in range(3):
+        assert client.post("/api/v1/auth/forgot-password", json={"email": "person@example.com"}).status_code == 200
+    assert len(email_service.provider.sent) == 3
+    fourth = client.post("/api/v1/auth/forgot-password", json={"email": "person@example.com"})
+    assert fourth.status_code == 200
+    assert len(email_service.provider.sent) == 3
+
+    first_token = email_service.provider.sent[0].body.split("reset-password=")[-1].splitlines()[0]
+    latest_token = email_service.provider.sent[2].body.split("reset-password=")[-1].splitlines()[0]
+    assert client.post("/api/v1/auth/reset-password", json={"token": first_token, "new_password": "newpass123"}).status_code == 400
+    assert client.post("/api/v1/auth/reset-password", json={"token": latest_token, "new_password": "newpass123"}).status_code == 200
+    app.dependency_overrides.clear()
+
+
+def test_inactive_and_non_consumer_accounts_do_not_receive_reset_links(client: TestClient) -> None:
+    register(client)
+    register(client, role="WORKER", email="worker@example.com")
+    email_service = EmailService(provider=FakeEmailProvider())
+    app.dependency_overrides[get_email_service] = lambda: email_service
+
+    with client.auth_session_factory() as session:
+        user = session.scalar(select(User).where(User.email == "person@example.com"))
+        assert user is not None
+        user.account_status = AccountStatus.SUSPENDED
+        session.commit()
+
+    for email in ("person@example.com", "worker@example.com"):
+        response = client.post("/api/v1/auth/forgot-password", json={"email": email})
+        assert response.status_code == 200
+    assert email_service.provider.sent == []
+    with client.auth_session_factory() as session:
+        assert session.scalar(select(PasswordResetToken)) is None
     app.dependency_overrides.clear()
 
 

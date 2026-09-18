@@ -1,3 +1,4 @@
+from datetime import timezone
 from uuid import UUID
 
 import jwt
@@ -36,7 +37,16 @@ def get_current_user(
         raise authentication_error() from None
 
     user = session.scalar(select(User).where(User.id == user_id))
+    issued_at = payload.get("iat")
     if user is None or user.account_status is not AccountStatus.ACTIVE:
+        raise authentication_error()
+    password_changed_at = user.password_changed_at
+    if password_changed_at is not None and password_changed_at.tzinfo is None:
+        password_changed_at = password_changed_at.replace(tzinfo=timezone.utc)
+    if password_changed_at is not None and (
+        not isinstance(issued_at, (int, float))
+        or int(issued_at) <= int(password_changed_at.timestamp())
+    ):
         raise authentication_error()
     return user
 

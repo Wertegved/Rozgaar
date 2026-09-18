@@ -1,6 +1,7 @@
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Enum, ForeignKey, Index, Numeric, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -16,6 +17,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     phone: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
     email: Mapped[str | None] = mapped_column(String(320), unique=True)
     password_hash: Mapped[str | None] = mapped_column(String(255))
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     account_status: Mapped[AccountStatus] = mapped_column(
         Enum(AccountStatus, name="account_status"), default=AccountStatus.ACTIVE, nullable=False
     )

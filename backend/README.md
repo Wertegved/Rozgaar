@@ -73,11 +73,15 @@ Phase 5 provides:
 
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
+- `POST /api/v1/auth/forgot-password`
+- `POST /api/v1/auth/reset-password`
 - `GET /api/v1/auth/me`
 
 Registration accepts `CONSUMER` and `WORKER` roles. Public `ADMIN` registration is rejected; administrators require a later controlled provisioning process. Passwords are hashed with Argon2id, and login returns a short-lived JWT bearer token.
 
 Set a strong local `JWT_SECRET_KEY` in the untracked backend `.env` before using login. Never commit it, place it in frontend code, or print it in logs. `JWT_ALGORITHM` defaults to `HS256`, and `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` defaults to `30`.
+
+Password reset links use `CONSUMER_WEB_URL` and expire after `PASSWORD_RESET_TOKEN_EXPIRE_MINUTES` (default `30`). Outside development, `CONSUMER_WEB_URL` must use `https://`.
 
 Database connectivity and all non-authentication business functionality remain phase-specific work.
 

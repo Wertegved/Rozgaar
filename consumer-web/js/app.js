@@ -17,7 +17,8 @@ async function api(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (response.status === 204) return null;
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error?.detail || body?.detail || 'Something went wrong.');
+  const detail = body?.error?.detail || body?.detail;
+  if (!response.ok) throw new Error((Array.isArray(detail) ? detail.map(item => item.msg).join(' ') : detail) || 'Something went wrong.');
   if (path === '/auth/me' && body?.id && state.token) { state.user = body; startConsumerRealtime(); }
   return body;
 }
@@ -72,28 +73,37 @@ function openAbout() { openDrawer(`<button class="drawer-close" data-action="clo
 function openComplaint(jobId) { openDrawer(`<button class="drawer-close" data-action="close-drawer" aria-label="Close">×</button><div class="drawer-header"><p class="eyebrow">Contact Rozgaar</p><h2>Tell us what needs attention.</h2><p>Your report is private and attached to the relevant job when applicable.</p></div><form id="complaint-form"><input type="hidden" id="complaint-job" value="${esc(jobId || '')}"><div class="field"><label for="complaint-category">What is this about?</label><select id="complaint-category"><option value="PAYMENT">Payment</option><option value="WORKER_ISSUE">Worker issue</option><option value="JOB_ISSUE">Job issue</option><option value="CANCELLATION">Cancellation</option><option value="TECHNICAL">Technical</option><option value="GENERAL">General</option><option value="OTHER">Other</option></select></div><div class="field"><label for="complaint-message">What happened?</label><textarea id="complaint-message" required maxlength="5000" placeholder="Share the useful details. Please don’t include passwords or payment credentials."></textarea></div><div class="form-error" id="complaint-error"></div><button class="button button-primary" type="submit">Send report</button></form>`, 'Contact Rozgaar'); $('#complaint-form').addEventListener('submit', async event => { event.preventDefault(); try { await api('/complaints', { method: 'POST', body: JSON.stringify({ job_id: $('#complaint-job').value || null, category: $('#complaint-category').value, message: $('#complaint-message').value.trim() }) }); closeDrawer(); showToast('Report received. We’ll keep you updated.'); } catch (error) { $('#complaint-error').textContent = error.message; } }); }
 
 function openForgotPasswordFlow() {
-  openDrawer(`<button class="drawer-close" data-action="close-drawer" aria-label="Close">×</button><div class="drawer-header"><p class="eyebrow">Reset access</p><h2>Forgot your password?</h2><p>Enter your email and we’ll send a reset link if that account exists.</p></div><form id="forgot-password-form"><div class="field"><label for="forgot-email">Email address</label><input id="forgot-email" type="email" required autocomplete="email"></div><div class="form-error" id="forgot-password-error"></div><button class="button button-primary" type="submit">Send reset link</button></form><p class="drawer-note"><button class="text-button" type="button" data-action="open-login">Back to log in</button></p>`, 'Forgot password');
+  openDrawer(`<button class="drawer-close" data-action="close-drawer" aria-label="Close">×</button><div class="drawer-header"><p class="eyebrow">Reset access</p><h2>Forgot your password?</h2><p>Enter your email and we’ll send a reset link if that account exists.</p></div><form id="forgot-password-form"><div class="field"><label for="forgot-email">Email address</label><input id="forgot-email" type="email" required autofocus autocomplete="email"></div><div class="form-error" id="forgot-password-error" role="alert"></div><button class="button button-primary" type="submit">Send reset link</button></form><p class="drawer-note"><button class="text-button" type="button" data-action="open-login">Back to log in</button></p>`, 'Forgot password');
   $('#forgot-password-form').addEventListener('submit', async event => {
     event.preventDefault();
     const error = $('#forgot-password-error');
+    const form = event.currentTarget;
+    const submit = form.querySelector('button[type="submit"]');
     error.textContent = '';
+    submit.disabled = true;
     try {
-      const result = await api('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: $('#forgot-email').value.trim() }) });
-      closeDrawer();
-      showToast(result.message || 'If an account exists for that email, a reset link is on its way.');
-      openAuth('login');
+      await api('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: $('#forgot-email').value.trim() }) });
+      form.outerHTML = '<div class="drawer-section"><h3>Check your email.</h3><p>It can take a minute to arrive. Check your spam folder too.</p><button class="button button-secondary" type="button" data-action="open-login">Back to log in</button></div>';
     } catch (forgotError) {
       error.textContent = forgotError.message;
+      submit.disabled = false;
     }
   });
 }
 
 function openResetPasswordFlow(token = '') {
-  openDrawer(`<button class="drawer-close" data-action="close-drawer" aria-label="Close">×</button><div class="drawer-header"><p class="eyebrow">Set a new password</p><h2>Choose a fresh password.</h2><p>Use at least 8 characters. If the link is expired, request a new one.</p></div><form id="reset-password-form"><div class="field"><label for="reset-password">New password</label><input id="reset-password" type="password" minlength="8" maxlength="128" required autocomplete="new-password"></div><div class="form-error" id="reset-password-error"></div><button class="button button-primary" type="submit">Reset password</button></form><p class="drawer-note"><button class="text-button" type="button" data-action="open-forgot-password">Request another link</button></p>`, 'Reset password');
+  openDrawer(`<button class="drawer-close" data-action="close-drawer" aria-label="Close">×</button><div class="drawer-header"><p class="eyebrow">Set a new password</p><h2>Choose a fresh password.</h2><p>Use at least 8 characters. If the link is expired, request a new one.</p></div><form id="reset-password-form"><div class="field"><label for="reset-password">New password</label><input id="reset-password" type="password" minlength="8" maxlength="128" required autofocus autocomplete="new-password"></div><div class="field"><label for="reset-password-confirm">Confirm password</label><input id="reset-password-confirm" type="password" minlength="8" maxlength="128" required autocomplete="new-password"></div><div class="form-error" id="reset-password-error" role="alert"></div><button class="button button-primary" type="submit">Reset password</button></form><p class="drawer-note"><button class="text-button" type="button" data-action="open-forgot-password">Request another link</button></p>`, 'Reset password');
   $('#reset-password-form').addEventListener('submit', async event => {
     event.preventDefault();
     const error = $('#reset-password-error');
+    const form = event.currentTarget;
+    const submit = form.querySelector('button[type="submit"]');
     error.textContent = '';
+    if ($('#reset-password').value !== $('#reset-password-confirm').value) {
+      error.textContent = 'Passwords do not match.';
+      return;
+    }
+    submit.disabled = true;
     try {
       const result = await api('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, new_password: $('#reset-password').value }) });
       closeDrawer();
@@ -101,6 +111,7 @@ function openResetPasswordFlow(token = '') {
       openAuth('login');
     } catch (resetError) {
       error.textContent = resetError.message;
+      submit.disabled = false;
     }
   });
 }
