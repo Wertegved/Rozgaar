@@ -158,6 +158,7 @@ function consumeResetToken() {
   history.replaceState(null, '', window.location.pathname + window.location.search);
   return match[1];
 }
-render();
 const resetToken = consumeResetToken();
+if (resetToken) { state.token = null; localStorage.removeItem('rozgaar_token'); }
+render();
 if (resetToken) openResetPasswordFlow(resetToken);

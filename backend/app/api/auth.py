@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import get_current_user, oauth2_scheme
 from app.core.config import get_settings
 from app.db.session import get_db
+from app.providers.email import FakeEmailProvider
 from app.schemas.auth import (
     AuthResponse,
     ForgotPasswordRequest,
@@ -16,7 +17,7 @@ from app.schemas.auth import (
     UserResponse,
 )
 from app.services.auth_service import login_user, request_password_reset, register_user, reset_password
-from app.services.email_service import EmailService, FakeEmailProvider
+from app.services.email_service import EmailService
 
 logger = logging.getLogger(__name__)
 
