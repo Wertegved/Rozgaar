@@ -135,6 +135,10 @@ openAuth = function (mode = 'login') {
 const existingOpenPostDrawer = openPostDrawer;
 openPostDrawer = function () {
   existingOpenPostDrawer();
+  bindDescriptionAutocomplete($('#drawer'), {
+    get title() { return $('#job-title')?.value.trim() || ''; },
+    get category() { return $('.choice.selected[data-choice="category"]')?.dataset.value || ''; },
+  });
   const locationInput = $('#job-location');
   const categoryChoices = () => $('.choice.selected[data-choice="category"]')?.dataset.value || 'GENERAL';
   const refreshLocationIntelligence = async () => {
@@ -172,7 +176,5 @@ function consumeResetToken() {
 }
 const resetToken = consumeResetToken();
 if (resetToken) { state.token = null; localStorage.removeItem('rozgaar_token'); }
-const existingBindPostForm = bindPostForm;
-bindPostForm = function () { existingBindPostForm(); const drawer = $('#drawer'); const draft = { title: $('#job-title', drawer)?.value.trim() || '', category: $('.choice.selected[data-choice="category"]', drawer)?.dataset.value || '' }; $('#job-title', drawer)?.addEventListener('input', event => { draft.title = event.target.value.trim(); }); $$('.choice[data-choice="category"]', drawer).forEach(button => button.addEventListener('click', () => { draft.category = button.dataset.value || ''; })); bindDescriptionAutocomplete(drawer, draft); };
 render();
 if (resetToken) openResetPasswordFlow(resetToken);
