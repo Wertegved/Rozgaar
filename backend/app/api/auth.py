@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import get_current_user, oauth2_scheme
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.db.session import SessionLocal, engine
 from app.infrastructure.redis import consume_rate_limit
 from app.providers.email import FakeEmailProvider
 from app.schemas.auth import (
@@ -26,23 +25,6 @@ logger = logging.getLogger(__name__)
 
 def get_email_service() -> EmailService:
     return EmailService()
-
-
-def _send_password_reset_email(email: str) -> None:
-    session = SessionLocal()
-    try:
-        result = request_password_reset(session, email)
-        if result is None:
-            return
-        user, raw_token = result
-        reset_link = f"{get_settings().consumer_web_url.rstrip('/')}/#reset-password={raw_token}"
-        EmailService().send(
-            str(user.email),
-            "Reset your Rozgaar password",
-            f"Use the link below to reset your password. This link expires in {get_settings().password_reset_token_expire_minutes} minutes.\n\n{reset_link}\n\nIf you did not request this, you can ignore this email.",
-        )
-    finally:
-        session.close()
 
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -68,11 +50,12 @@ def forgot_password(
     email_service: EmailService = Depends(get_email_service),
 ) -> MessageResponse:
     client_ip = request.client.host if request.client else "unknown"
-    if not consume_rate_limit(f"password-reset:ip:{client_ip}", limit=10, window_seconds=3600):
-        return MessageResponse(message="If an account exists for that email, a reset link is on its way.")
-
-    if engine is not None:
-        background_tasks.add_task(_send_password_reset_email, str(data.email))
+    if not consume_rate_limit(
+        f"password-reset:ip:{client_ip}",
+        limit=10,
+        window_seconds=3600,
+        fail_closed=get_settings().environment.lower() != "development",
+    ):
         return MessageResponse(message="If an account exists for that email, a reset link is on its way.")
 
     result = request_password_reset(session, str(data.email))

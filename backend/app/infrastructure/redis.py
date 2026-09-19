@@ -1,9 +1,12 @@
+import logging
 from functools import lru_cache
 
 from redis import Redis
 from redis.exceptions import RedisError
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache
@@ -20,7 +23,7 @@ def is_redis_available() -> bool:
         return False
 
 
-def consume_rate_limit(key: str, limit: int, window_seconds: int) -> bool:
+def consume_rate_limit(key: str, limit: int, window_seconds: int, *, fail_closed: bool = True) -> bool:
     try:
         client = get_redis_client()
         count = client.incr(key)
@@ -28,7 +31,8 @@ def consume_rate_limit(key: str, limit: int, window_seconds: int) -> bool:
             client.expire(key, window_seconds)
         return count <= limit
     except (RedisError, OSError):
-        return True
+        logger.exception("Redis rate-limit check failed for key %s", key)
+        return not fail_closed
 
 
 def close_redis_client() -> None:

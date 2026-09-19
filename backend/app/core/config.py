@@ -52,10 +52,14 @@ class Settings(BaseSettings):
     )
 
     @model_validator(mode="after")
-    def validate_consumer_web_url(self) -> "Settings":
+    def validate_security_settings(self) -> "Settings":
         self.consumer_web_url = self.consumer_web_url.rstrip("/")
         if self.environment.lower() != "development" and not self.consumer_web_url.startswith("https://"):
             raise ValueError("CONSUMER_WEB_URL must use https:// outside development")
+        if self.jwt_secret_key and len(self.jwt_secret_key) < 32:
+            raise ValueError("JWT_SECRET_KEY must be at least 32 characters long")
+        if self.environment.lower() != "development" and not self.jwt_secret_key:
+            raise ValueError("JWT_SECRET_KEY is required outside development")
         return self
 
     @field_validator("smtp_port", mode="before")
